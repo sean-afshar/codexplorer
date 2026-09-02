@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+uv.lock
+
+# Editors / OS
+.DS_Store
+*.swp
+.claude/settings.local.json
+
+# Connectome data (too large for git)
+data/
+*.swc
+*.zip
+*.csv.gz
+*.feather
+*.parquet

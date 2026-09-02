@@ -1,7 +1,35 @@
 [project]
 name = "codexplorer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Shared workspace for merging two fly-connectome analysis packages"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "polars>=1.0",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "navis>=1.9",
+    "plotly>=5.0",
+    "matplotlib>=3.7",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+connect-tome = "shayan.cli:cli"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Every package under src/ is discovered automatically, so a second
+# subfolder (e.g. src/<colleague>/) needs no change here.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
