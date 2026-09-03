@@ -13,6 +13,15 @@ uv.lock
 .DS_Store
 *.swp
 .claude/settings.local.json
+.vscode
+
+# Local agent instructions and state
+agent/
+.agents/
+.codex/
+.claude/
+AGENTS.md
+CLAUDE.md
 
 # Connectome data (too large for git)
 data/

@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
     "scipy>=1.10",
+    "pyarrow>=14",
     "navis>=1.9",
     "plotly>=5.0",
     "matplotlib>=3.7",
@@ -19,8 +20,11 @@ dependencies = [
 [project.scripts]
 connect-tome = "shayan.cli:cli"
 
+[project.optional-dependencies]
+notebooks = ["ipykernel>=6", "jupyterlab>=4"]
+
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "nbformat>=5.10"]
 
 [build-system]
 requires = ["setuptools>=68"]
