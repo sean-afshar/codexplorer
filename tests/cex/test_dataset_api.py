@@ -3,8 +3,10 @@ import shutil
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from cex import FlyWireDataset, get_dataset
+import cex.dataset.schema as schema
 from cex.neurons import Neuron, NeuronBase
 from cex.preprocessing import build_column_data, build_connectivity_edges, build_mcns_synapse_source_data, build_type_connectivity_data, build_type_data, download_and_extract, normalize_io_stat_table, normalize_side_values, sort_table_and_add_id
 from cex.preprocessing import io_stat
@@ -75,6 +77,22 @@ def test_neuron_summary_and_flywire_url(tmp_path):
     assert isinstance(NeuronBase([0, 2], dataset).root_id, np.ndarray)
 
 
+def test_visual_types_reads_only_normalized_table(tmp_path):
+    write_fixture(tmp_path)
+    dataset = get_dataset("flywire", tmp_path)
+    raw_table = pd.DataFrame({"type": ["raw"]})
+    raw_fp = tmp_path / "download_data" / "visual_neuron_types.csv"
+    raw_table.to_csv(raw_fp, index=False)
+
+    with pytest.raises(FileNotFoundError):
+        _ = dataset.visual_types
+
+    normalized_table = pd.DataFrame({"type": ["normalized"], "category": ["visual"]})
+    normalized_table.to_parquet(tmp_path / "preprocessed" / schema.VISUAL_TYPE_DATA_FILE, index=False)
+
+    pd.testing.assert_frame_equal(dataset.visual_types, normalized_table)
+
+
 def test_preprocessing_normalizes_type_and_column_metadata():
     cells = pd.DataFrame({"id": [0, 1], "rid": [10, 11], "type": ["A", "A"], "side": normalize_side_values(["left", "right"]), "nt_type": ["ACH", "ACH"]})
     type_data = build_type_data(cells, value_cols=["nt_type"], col_name_map={"nt_type": "nt"})
@@ -104,6 +122,23 @@ def test_download_and_extract_removes_successful_archive(tmp_path):
     assert output == tmp_path / "output"
     assert (output / "data.txt").read_text() == "ok"
     assert not (output / "fixture.zip").exists()
+
+
+def test_download_and_extract_strips_one_archive_root(tmp_path):
+    source = tmp_path / "source" / "preprocessed"
+    source.mkdir(parents=True)
+    (source / "cell_data.parquet").write_text("fixture")
+    archive = shutil.make_archive(str(tmp_path / "flywire_preprocessed"), "zip", source.parent)
+
+    output = download_and_extract(
+        Path(archive).as_uri(),
+        tmp_path / "data" / "flywire" / "preprocessed",
+        strip_single_root_Q=True,
+    )
+
+    assert (output / "cell_data.parquet").read_text() == "fixture"
+    assert not (output / "preprocessed").exists()
+    assert not (output / "flywire_preprocessed.zip").exists()
 
 
 def test_io_stat_handles_missing_connected_cell_types(tmp_path):

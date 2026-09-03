@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 from functools import cached_property
+import os
 
 import numpy as np
 
 from .cell import Cell
 from .column import Column
 from .connectivity import Connectivity
-from . import flywire_links
+from . import flywire_links, schema
 from .paths import DatasetPaths, MCNS_RELEASE_BY_DATASET, dataset_family, normalize_dataset_name
 from .stats import IOStatMixin
 from .synapse import Synapse
 from ..util import bin_data_to_idx_list
-from ..util.tables import find_table, read_table
+from ..util.tables import read_table
 
 
 def get_dataset(name: str, fp_root: str | None = None):
@@ -97,12 +98,9 @@ class FlyWireDataset(ConnectomeDataset):
 
     @cached_property
     def visual_types(self):
-        """FlyWire-specific visual type table when present."""
-        for folder in [self.paths.fp_preprocessed, self.paths.fp_download]:
-            fp = find_table(folder, "visual_types") or find_table(folder, "visual_neuron_types")
-            if fp is not None:
-                return read_table(fp)
-        raise FileNotFoundError("No visual type table found for this dataset")
+        """Return the normalized FlyWire visual-type table."""
+        fp = os.path.join(self.paths.fp_preprocessed, schema.VISUAL_TYPE_DATA_FILE)
+        return read_table(fp)
 
     def codex_url(self, rids, page_size: int = 10) -> str:
         """Return a Codex search URL for FlyWire RIDs."""

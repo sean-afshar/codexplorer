@@ -1,6 +1,8 @@
 # CEX Normalized Data Layout
 
-`cex` reads a dataset root containing `download_data/` and `preprocessed/`.
+`cex` preprocessing uses a dataset root containing `download_data/` and
+`preprocessed/`; runtime dataset APIs read normalized files only from
+`preprocessed/`.
 When no root is supplied, `get_dataset("flywire")` uses
 `./data/flywire/`; `mcns` and `mcns_v1` use the corresponding lower-case
 dataset folders. The preprocessing notebooks instead resolve their default
@@ -8,7 +10,15 @@ root from the installed CEX package, as `<codexplorer>/data/<dataset_name>/`,
 so they do not depend on the notebook working directory. The `00` and `01`
 notebooks can optionally download and extract a user-provided Dropbox archive
 into `download_data/`, then delete the archive after successful extraction.
-They do not bundle connectome data.
+The basic-usage notebook can instead download an archive of already normalized
+FlyWire tables directly into `<codexplorer>/data/flywire/preprocessed/`. It
+strips one enclosing `preprocessed/` directory from the ZIP so the destination
+never becomes `preprocessed/preprocessed/`. The repository does not bundle
+connectome data.
+
+After preprocessing succeeds, runtime use does not require the raw files in
+`download_data/`. In particular, `FlyWireDataset.visual_types` reads only
+`preprocessed/visual_type_data.parquet`.
 
 | File | Required columns or arrays | Purpose |
 | --- | --- | --- |
@@ -24,6 +34,7 @@ start at zero, and match the row order of `cell_data.parquet`; sparse matrices
 use it directly as their index. `rid` remains the dataset-provided external
 identifier.
 
-Use the notebooks in `notebooks/cex/preprocessing/` in order: prepare FlyWire
-or Male CNS tables, including per-cell I/O statistics. The dataset-specific `00` and `01` notebooks own the entire
-preprocessing workflow.
+Use either dataset-specific notebook in `notebooks/cex/preprocessing/` to
+prepare FlyWire or Male CNS tables, including per-cell I/O statistics. The
+FlyWire basic-usage notebook's optional download is an alternative when the
+preprocessed archive is available.
