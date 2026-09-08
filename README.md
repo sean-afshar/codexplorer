@@ -23,5 +23,7 @@ preprocessing notebooks. After preparing a dataset with the FlyWire `00` or
 Male CNS `01` notebook, use
 [`00_basic_package_usage.ipynb`](notebooks/cex/00_basic_package_usage.ipynb)
 for documented examples of type metadata, connectivity, single-neuron I/O,
-and FlyWire viewer URLs. Its optional setup section can download a ZIP of
-preprocessed FlyWire tables directly into `data/flywire/preprocessed/`.
+and FlyWire viewer URLs. Its neuron example displays the five strongest input
+types and their synapse locations in Neuroglancer. Its optional setup section
+can download a ZIP of preprocessed FlyWire tables directly into
+`data/flywire/preprocessed/`.

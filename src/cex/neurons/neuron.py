@@ -37,25 +37,25 @@ class NeuronBase:
         dataset: ConnectomeDataset,
         remove_autapse_Q: bool = False,
         min_syn_per_rid: int = 1,
-        load_xyz_Q: bool = False,
+        load_syn_Q: bool = False,
         parse_io_Q: bool = True,
     ):
         self.id = id
         self.dataset = dataset
-        self.load_xyz_Q = load_xyz_Q
+        self.load_syn_Q = load_syn_Q
         self._data = {}
         if parse_io_Q:
             self.__parse_io(
                 remove_autapse_Q=remove_autapse_Q,
                 min_syn_per_rid=min_syn_per_rid,
-                load_xyz_Q=load_xyz_Q,
+                load_syn_Q=load_syn_Q,
             )
 
     def __parse_io(
         self,
         remove_autapse_Q: bool = False,
         min_syn_per_rid: int = 1,
-        load_xyz_Q: bool = False,
+        load_syn_Q: bool = False,
     ) -> None:
         self.input = NeuronBase._parse_synapse_data(
             self._id_array,
@@ -64,7 +64,7 @@ class NeuronBase:
             0,
             remove_autapse_Q,
             min_syn_per_rid,
-            xyz_Q=load_xyz_Q,
+            xyz_Q=load_syn_Q,
         )
         self.output = NeuronBase._parse_synapse_data(
             self._id_array,
@@ -73,7 +73,7 @@ class NeuronBase:
             1,
             remove_autapse_Q,
             min_syn_per_rid,
-            xyz_Q=load_xyz_Q,
+            xyz_Q=load_syn_Q,
         )
 
     @cached_property
@@ -236,7 +236,7 @@ class NeuronBase:
         """Return Neuroglancer annotation layers for connected synapse sets."""
         syn_data = getattr(self, syn_dir)
         if "xyz" not in syn_data:
-            raise ValueError("Synapse annotation layers require Neuron(..., load_xyz_Q=True)")
+            raise ValueError("Synapse annotation layers require Neuron(..., load_syn_Q=True)")
 
         syn_ann_layer = {}
         for cell_type in type_list:
@@ -427,7 +427,7 @@ class Neuron(NeuronBase):
         dataset: ConnectomeDataset,
         remove_autapse_Q: bool = False,
         min_syn_per_rid: int = 1,
-        load_xyz_Q: bool = False,
+        load_syn_Q: bool = False,
         parse_io_Q: bool = True,
     ):
         if not isinstance(id, (int, np.integer)):
@@ -437,7 +437,7 @@ class Neuron(NeuronBase):
             dataset,
             remove_autapse_Q=remove_autapse_Q,
             min_syn_per_rid=min_syn_per_rid,
-            load_xyz_Q=load_xyz_Q,
+            load_syn_Q=load_syn_Q,
             parse_io_Q=parse_io_Q,
         )
 

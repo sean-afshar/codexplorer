@@ -69,9 +69,11 @@ def test_type_connectivity_and_metadata(tmp_path):
 def test_neuron_summary_and_flywire_url(tmp_path):
     write_fixture(tmp_path)
     dataset = FlyWireDataset(tmp_path)
-    neuron = Neuron(0, dataset, remove_autapse_Q=True)
+    neuron = Neuron(0, dataset, remove_autapse_Q=True, load_syn_Q=True)
 
     assert neuron.root_id == 10
+    assert neuron.load_syn_Q is True
+    assert "xyz" in neuron.input
     assert neuron.get_top_n_output_type_stat().iloc[0]["type"] == "B"
     assert "spelunker.cave-explorer.org" in dataset.ng_url_for_ids([0])
     assert isinstance(NeuronBase([0, 2], dataset).root_id, np.ndarray)
