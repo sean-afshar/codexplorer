@@ -41,6 +41,12 @@ class NeuronSet:
         for i in self.idx:
             yield Neuron(self.ds, int(i))
 
+    def __getitem__(self, i):
+        """``grp[0]`` is a Neuron; a slice is a NeuronSet."""
+        if isinstance(i, slice):
+            return NeuronSet(self.ds, self.idx[i], f"{self.label}[{i.start or ''}:{i.stop or ''}]")
+        return Neuron(self.ds, int(self.idx[i]))
+
     def __contains__(self, item) -> bool:
         if isinstance(item, Neuron):
             return bool(np.isin(item.idx, self.idx).all())

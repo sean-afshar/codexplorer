@@ -1,3 +1,5 @@
+> **Legacy.** This describes the `cex` layout. The merged package writes the layout in [schema.md](schema.md).
+
 # CEX Normalized Data Layout
 
 `cex` preprocessing uses a dataset root containing `download_data/` and

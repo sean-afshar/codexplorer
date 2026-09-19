@@ -36,6 +36,22 @@ def _search_roots() -> list[Path]:
     return [Path(r) for r in roots if r and Path(r).is_dir()]
 
 
+def available() -> list[tuple[str, str, Path, "schema.Manifest"]]:
+    """(dataset, version, directory, manifest) for every built dataset under the search roots."""
+    out = []
+    for root in _search_roots():
+        for d in sorted(root.iterdir()):
+            mf = d / "tables" / schema.MANIFEST_FILE
+            if not mf.is_file():
+                continue
+            try:
+                m = schema.Manifest.read(d / "tables")
+            except (OSError, ValueError, TypeError):
+                continue
+            out.append((m.dataset, str(m.version), d, m))
+    return out
+
+
 def resolve(name: str, version: str | None = None) -> Path:
     """Find ``<root>/<dir>/tables/manifest.json`` whose dataset is ``name`` (latest version unless given)."""
     key = ALIASES.get(name.lower(), name.lower())

@@ -1,7 +1,7 @@
 [project]
-name = "codexplorer"
+name = "connexplorer"
 version = "0.1.0"
-description = "Shared workspace for merging two fly-connectome analysis packages"
+description = "Fast, polars-native access to fly connectomes (FlyWire FAFB, Male CNS): connectivity, synapses, morphology, cable models, viewers"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -18,7 +18,8 @@ dependencies = [
 ]
 
 [project.scripts]
-connect-tome = "shayan.cli:cli"
+connexplorer = "connexplorer.cli:cli"
+connect-tome = "shayan.cli:cli"  # legacy, deprecated
 
 [project.optional-dependencies]
 notebooks = ["ipykernel>=6", "jupyterlab>=4"]

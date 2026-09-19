@@ -15,6 +15,14 @@ Quick start::
 The morphology and modeling helpers depend on navis / plotly / scipy, which
 are slow to import, so they are loaded lazily on first attribute access.
 """
+import warnings as _warnings
+
+_warnings.warn(
+    "the 'shayan' package is deprecated: use 'connexplorer' (see docs/migrating_from_shayan.md)",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 __version__ = "0.1.0"
 

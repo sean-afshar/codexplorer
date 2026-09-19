@@ -1,7 +1,9 @@
 # Merged connectome package: design plan
 
 Date: 2026-09-10; updated 2026-09-19 with the authors' decisions on the six
-open questions (section 7). Inputs: static review of `src/shayan` and `src/cex`, hands-on
+open questions (section 7). **Status (2026-09-19): phases 0 to 5 are
+implemented in `src/connexplorer`; see `docs/quickstart.md`, `docs/schema.md`
+and the two migration guides.** Inputs: static review of `src/shayan` and `src/cex`, hands-on
 benchmarks of both against FlyWire FAFB v783 and Male CNS v0.9, a cross-package
 consistency check, and a backend micro-benchmark on the normalized tables.
 Raw reports are in `docs/reports/` (`bench_shayan_report.md`,
