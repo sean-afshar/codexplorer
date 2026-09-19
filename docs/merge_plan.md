@@ -1,6 +1,7 @@
 # Merged connectome package: design plan
 
-Date: 2026-09-10. Inputs: static review of `src/shayan` and `src/cex`, hands-on
+Date: 2026-09-10; updated 2026-09-19 with the authors' decisions on the six
+open questions (section 7). Inputs: static review of `src/shayan` and `src/cex`, hands-on
 benchmarks of both against FlyWire FAFB v783 and Male CNS v0.9, a cross-package
 consistency check, and a backend micro-benchmark on the normalized tables.
 Raw reports are in `docs/reports/` (`bench_shayan_report.md`,
@@ -8,11 +9,13 @@ Raw reports are in `docs/reports/` (`bench_shayan_report.md`,
 `cex_flywire_data_report.md`, `cex_mcns_data_report.md`).
 
 Priorities, in order (from the authors): speed of loading and manipulation;
-an API familiar to pandas/numpy users; first-class connectivity, synapse
+an API familiar to polars/numpy users; first-class connectivity, synapse
 locations and morphology; FlyWire and Male CNS today, more datasets later;
 clean code.
 
-Package name below is the placeholder `cx`. Pick a real name in phase 0.
+The package is `connexplorer` (connectome explorer), imported as `cnx` in the
+examples below. Every table it returns is a polars DataFrame; pandas is not a
+dependency.
 
 ---
 
@@ -77,18 +80,20 @@ The lazy synapse path is fast only because `synapses.parquet` is sorted by
    files are ingestion inputs only.
 2. **Connectivity derived from synapses**, one row per (pre, post), autapses
    kept, neuropil preserved in a secondary table.
-3. **In memory: three layers.** Polars DataFrames hold loaded tables (fastest
-   load, lowest RSS). scipy CSR/CSC plus numpy serve every hot path (100 to
-   1000x faster than any DataFrame filter). pandas is what the user receives.
+3. **In memory: two layers.** Polars DataFrames hold loaded tables (fastest
+   load, lowest RSS) and are what the user receives. scipy CSR/CSC plus numpy
+   serve every hot path (100 to 1000x faster than any DataFrame filter).
 4. **Public IDs are root IDs (int64).** Dense 0..N-1 ids exist internally
    for sparse indexing and are exposed only as documented array positions.
 5. **Synapses are never loaded wholesale.** `scan_parquet` with predicate
-   pushdown, 0.5 ms per neuron, 0.13 GB.
+   pushdown, 0.5 ms per neuron, 0.13 GB. A second copy sorted by `post` gives
+   input-side queries the same speed (decision 4, section 7).
 6. **Precomputed I/O-stat CSVs are dropped.** Live computation from CSC plus
    `bincount` takes 1 ms; the 17,094 CSVs (784 MB) buy nothing.
 7. **Precomputed type x type npz is kept** (8 ms load versus 0.35 s recompute).
-8. **pandas with pyarrow dtypes is rejected**: slower than plain pandas on every
-   filter, isin and pivot path.
+8. **pandas is not returned at all** (decision 2, section 7). It was slower
+   than polars on every measured path, and pandas with pyarrow dtypes slower
+   still; a single frame type keeps the API consistent.
 
 ---
 
@@ -101,7 +106,7 @@ data/<dataset>/            e.g. data/flywire_783/, data/mcns_v0.9/
   raw/                     vendor downloads or symlinks; never read at runtime
   tables/                  normalized Parquet + npz; the only runtime input
     manifest.json          dataset id, version, source file hashes, row counts,
-                           invariants checked, cx schema version
+                           invariants checked, connexplorer schema version
 ```
 
 Runtime never creates directories. A missing table raises with the exact
@@ -112,14 +117,14 @@ path and the preprocessing command that produces it.
 | file | columns | notes |
 |---|---|---|
 | `cells.parquet` | `id u32` (row position), `root_id i64`, `type str?`, `side str?` (`"L"`,`"R"`,`"M"`, null), `nt str?`, `nt_score f32?`, `superclass str?`, `class str?`, `subclass str?`, `hemilineage str?`, `flow str?`, dataset extras | real nulls, no `"NAN"`/`"Unknown"` sentinels |
-| `types.parquet` | `type str`, `type_idx u32` (row position), `n_cells u32`, `nt str?`, `nt_source str?` (`"prediction"`/`"literature"`), majority-vote metadata | row order defines the type matrix axes |
+| `types.parquet` | `type str`, `type_idx u32` (row position), `n_cells u32`, `nt str?`, `nt_source str?` (`"prediction"`/`"literature"`), `nt_predicted str?`, majority-vote metadata | row order defines the type matrix axes; `nt_predicted` is the untouched majority vote so overrides are always recoverable |
 | `edges.parquet` | `pre u32`, `post u32`, `n_syn u32` | sorted by (`pre`, `post`); derived from synapses; autapses included |
 | `edges_by_neuropil.parquet` | `pre u32`, `post u32`, `neuropil str?`, `n_syn u32` | secondary; absent for datasets without neuropil labels |
 | `synapses.parquet` | `pre u32`, `post u32`, `x_nm u32`, `y_nm u32`, `z_nm u32`, `neuropil str?`, dataset extras | sorted by `pre`, 1,048,576-row row groups; **invariant** |
-| `synapses_by_post.parquet` | same columns | optional copy sorted by `post`, for input-side synapse queries |
+| `synapses_by_post.parquet` | same columns | copy sorted by `post`, same row-group size; written by every `Source` by default (`build(..., by_post=False)` skips it); listed in the manifest; runtime falls back to a 50 ms full scan when absent |
 | `type_matrix.npz` | CSR `data u64`, `indices i32`, `indptr i32`, `shape`, `type_list` | axes = `types.parquet` order |
 | `columns.parquet` | `id u32`, `p i16`, `q i16`, `side str`, dataset extras | optical-lobe hex columns; optional |
-| `skeletons/` | dataset-native skeleton store (FlyWire: the SWC zip; MCNS: TBD) plus `skeleton_index.parquet` (`root_id`, `member`, `n_nodes`, `units`) | optional |
+| `skeletons/` | SWC files for both datasets (FlyWire: the vendor SWC zip; MCNS: SWC from the vendor download, not yet fetched) plus `skeleton_index.parquet` (`root_id`, `member`, `n_nodes`, `units`) | optional |
 
 `n_syn` is `u32`, not `u16`, to remove the overflow footgun at the source.
 
@@ -137,12 +142,12 @@ path and the preprocessing command that produces it.
 
 ### 2.4 Preprocessing as library code
 
-`cx.ingest` holds one `Source` per dataset. A `Source` maps raw vendor files to
+`cnx.ingest` holds one `Source` per dataset. A `Source` maps raw vendor files to
 the normalized tables and nothing else. Notebooks become thin callers.
 
 ```python
-cx.ingest.flywire.build("data/flywire_783", raw="~/Code/connect_tome/data/flywire_fafb")
-cx.ingest.mcns.build("data/mcns_v0.9", raw=..., release="v0.9")
+cnx.ingest.flywire.build("data/flywire_783", raw="~/Code/connect_tome/data/flywire_fafb")
+cnx.ingest.mcns.build("data/mcns_v0.9", raw=..., release="v0.9")
 ```
 
 Requirements taken from the hands-on runs: stream the 6.8 GB MCNS synapse
@@ -153,27 +158,38 @@ literature neurotransmitter overrides as a labelled layer (`nt_source`), not a
 silent overwrite; validate the four raw MCNS files that are actually used and
 do not require the three that nothing reads.
 
-A `cx download <dataset>` command fetches a prebuilt `tables/` archive when one
+Neurotransmitter overrides (decision 6): each `Source` owns a
+`NT_OVERRIDES: dict[str, str]` mapping type name to transmitter, with a comment
+citing the source for every entry. FlyWire starts from cex's 13-entry table
+(R1-6, R7, R8 to HIS; Dm1/6/8/9/12/16/17/19/20 and T1 to GLUT); MCNS starts
+empty. Ingestion writes `nt_predicted` (majority vote over non-null cells),
+then `nt` = override if present else `nt_predicted`, and `nt_source` =
+`"literature"` or `"prediction"`. The manifest records the override table's
+version so a changed table shows up as a changed dataset.
+
+A `connexplorer download <dataset>` command fetches a prebuilt `tables/` archive when one
 exists (the FlyWire archive downloads in 30 s).
 
 ---
 
 ## 3. Runtime API
 
-Design rule: nouns are attributes, verbs are methods, results are pandas
-DataFrames, numpy arrays, or scipy sparse matrices. Brackets index by root ID
-or type name the way a pandas user expects. No fluent builder, no
+Design rule: nouns are attributes, verbs are methods, results are polars
+DataFrames, numpy arrays, or scipy sparse matrices. Brackets on the dataset
+and connectivity objects index by root ID or type name. Frames have no index;
+root IDs are ordinary columns. No pandas anywhere, no fluent builder, no
 dict-of-arrays returns, no `_Q` suffixes, no browser or filesystem side
 effects.
 
 ### 3.1 Opening a dataset
 
 ```python
-import cx
+import connexplorer as cnx
+import polars as pl
 
-ds = cx.open("flywire")                 # resolves data/flywire_783 via config or CX_DATA env
-ds = cx.open("mcns", version="v0.9")
-ds = cx.open("/abs/path/to/data/mcns_v0.9")
+ds = cnx.open("flywire")                # resolves data/flywire_783 via config or CONNEXPLORER_DATA env
+ds = cnx.open("mcns", version="v0.9")
+ds = cnx.open("/abs/path/to/data/mcns_v0.9")
 
 ds.name, ds.version, ds.n_cells, ds.n_synapses
 ds.info()                               # manifest summary
@@ -183,23 +199,23 @@ Opening reads the manifest only. Tables load on first attribute access and
 stay cached on the object. Everything is cheap except the CSR/CSC build
 (~0.3 s, once) and skeletons.
 
-### 3.2 Tables (pandas by default)
+### 3.2 Tables (polars)
 
 ```python
-ds.cells                    # DataFrame indexed by root_id: type, side, nt, nt_score, class, ...
-ds.cells.loc[720575940599755718]
-ds.cells[ds.cells.type == "T4a"]
-ds.types                    # DataFrame indexed by type: n_cells, nt, nt_source, ...
-ds.edges                    # DataFrame: pre, post (root ids), n_syn   (19.9M rows, 13 ms to convert)
-ds.edges_by_neuropil        # DataFrame or None
-ds.columns                  # DataFrame indexed by root_id: p, q, side  (or None)
-
-cx.config.frame = "polars"  # switch all table returns to polars; or per call: ds.cells_(frame="polars")
+ds.cells                    # pl.DataFrame: root_id, type, side, nt, nt_score, class, ...
+ds.cells.filter(pl.col("root_id") == 720575940599755718)
+ds.cells.filter(pl.col("type") == "T4a")
+ds.types                    # pl.DataFrame: type, n_cells, nt, nt_source, nt_predicted, ...
+ds.edges                    # pl.DataFrame: pre, post (root ids), n_syn   (19.9M rows, no copy)
+ds.edges_by_neuropil        # pl.DataFrame or None
+ds.columns                  # pl.DataFrame: root_id, p, q, side  (or None)
+ds.edges.lazy()             # anything bigger goes through polars lazy expressions
 ```
 
-Internally these are polars frames; conversion happens at the boundary
-(0.2 ms for typical results, zero-copy where possible). Integer results are
-upcast to int64 before they leave the package.
+These are the cached frames themselves, not copies; polars frames are
+immutable so sharing them is safe. Root IDs are `i64` columns, counts are
+`u32` on disk, and every aggregation the package performs casts to `u64`
+first so sums cannot overflow.
 
 ### 3.3 Selecting neurons
 
@@ -209,10 +225,10 @@ grp = ds["T4a"]                         # NeuronSet, all cells of a type
 grp = ds[["T4a", "T4b"]]                # NeuronSet, union of types
 grp = ds[[rid1, rid2, rid3]]            # NeuronSet by ids
 grp = ds.select(type="T4a", side="R")   # keyword filters over ds.cells columns
-grp = ds.select(ds.cells.nt == "GABA")  # any boolean mask over ds.cells
+grp = ds.select(pl.col("nt") == "GABA") # any polars expression over ds.cells
 
 grp.ids            # numpy int64 root ids
-grp.cells          # DataFrame slice of ds.cells
+grp.cells          # pl.DataFrame, the matching rows of ds.cells
 len(grp); grp & other; grp | other; grp - other
 ```
 
@@ -222,9 +238,9 @@ len(grp); grp & other; grp | other; grp - other
 
 ```python
 # partner tables
-n.outputs()                              # DataFrame: post, type, side, n_syn  (sorted desc)
+n.outputs()                              # pl.DataFrame: post, type, side, n_syn  (sorted desc)
 n.outputs(min_syn=5)                     # threshold applies to the pair total, never to fragments
-n.inputs(by="type")                      # DataFrame: type, n_syn, n_partners, frac_input
+n.inputs(by="type")                      # pl.DataFrame: type, n_syn, n_partners, frac_input
 grp.inputs(by="type", normalize="input") # frac of total input to the set
 n.outputs(by="neuropil")                 # uses edges_by_neuropil when present
 n.partners()                             # both directions
@@ -236,13 +252,15 @@ ds.connectivity[ids_a, ids_b]            # by root-id arrays
 blk = ds.connectivity["T4a", "LPi14"]
 blk.values                               # numpy (n_pre, n_post) dense; includes zero rows/cols
 blk.sparse                               # scipy csr, same shape
-blk.frame                                # pandas DataFrame, index=pre root ids, columns=post root ids
+blk.frame                                # pl.DataFrame, wide: column `pre` (root ids) then one column per post root id
+blk.long                                 # pl.DataFrame, long: pre, post, n_syn (nonzero only)
 blk.sum(), blk.row_ids, blk.col_ids, blk.row_types, blk.col_types
 
 # type-level matrix
 ds.connectivity.types["T4a", "LPi14"]                  # int
-ds.connectivity.types.loc[["T4a","T4b"], ["LPi14"]]    # DataFrame block
-ds.connectivity.types.frame                            # full 8547 x 8547 DataFrame (292 MB) on demand
+ds.connectivity.types[["T4a","T4b"], ["LPi14"]]        # TypeBlock: .values, .frame, .long as above
+ds.connectivity.types.frame                            # full 8547 x 8547 wide pl.DataFrame (292 MB) on demand
+ds.connectivity.types.long                             # pre_type, post_type, n_syn
 ds.connectivity.types.sparse                           # csr
 
 # whole-brain sparse matrix for power users
@@ -255,20 +273,21 @@ Normalization ported from `shayan`: `frac_input`, `frac_output`, and the
 geometric-mean `weight_norm`, with denominators computed over the full
 dataset once and cached (the 0.5 s recompute per call disappears).
 
-Graph statistics ported from `shayan.Circuit` onto `NeuronSet`:
-`grp.subgraph()` returns edges within the set; `grp.degree()`,
-`grp.hubs(k)`, `grp.reciprocal()`, `grp.degree_distribution()`.
+Graph statistics ported from `shayan.Circuit` onto `NeuronSet`; there is no
+`Circuit` class (decision 3): `grp.subgraph()` returns the edges within the
+set as a `pl.DataFrame`; `grp.degree()`, `grp.hubs(k)`, `grp.reciprocal()`,
+`grp.degree_distribution()`.
 
 ### 3.5 Synapse locations
 
 ```python
-n.synapses()                          # DataFrame: pre, post, x_nm, y_nm, z_nm, neuropil  (0.5 ms)
-n.synapses(direction="in")            # uses synapses_by_post when present, else scans
+n.synapses()                          # pl.DataFrame: pre, post, x_nm, y_nm, z_nm, neuropil  (0.5 ms)
+n.synapses(direction="in")            # same speed via synapses_by_post; 50 ms scan if that file is absent
 n.synapses(partner="LPi14")
 ds.synapses.between(pre, post)        # any Neuron/NeuronSet/ids
 ds.synapses.in_box(xmin, xmax, ...)   # lazy filter, collected on return
 ds.synapses.scan()                    # raw polars LazyFrame for anything else
-n.synapses().to_numpy()               # (k, 3) uint32 via a helper .xyz
+cnx.xyz(n.synapses())                 # (k, 3) uint32 numpy; or .select("x_nm","y_nm","z_nm").to_numpy()
 ```
 
 Never a full load unless the user asks: `ds.synapses.load()` returns the whole
@@ -277,21 +296,21 @@ table (0.1 s, 1.6 GB in polars) for people who want it.
 ### 3.6 Morphology and models (ported from `shayan`)
 
 ```python
-sk = n.skeleton()                     # navis TreeNeuron, ALWAYS micrometers; sk.units set
+sk = n.skeleton()                     # navis TreeNeuron from SWC (both datasets), ALWAYS micrometers; sk.units set
 sk = n.skeleton(units="nm")
 grp.skeletons(max_n=5)                # NeuronList; progress bar off by default
 
-comp = cx.morph.segment(sk, method="natural", min_length_um=0.5)
+comp = cnx.morph.segment(sk, method="natural", min_length_um=0.5)
                                       # zero-length compartments merged, not warned about
-comp.table                            # DataFrame of compartments (length, radius, parent, ...)
+comp.table                            # pl.DataFrame of compartments (length, radius, parent, ...)
 comp.hines()                          # scipy sparse conductance structure
 comp.summary()
 
-m = cx.models.Cable(comp, Rm=8000, Ra=400, Cm=0.6)
+m = cnx.models.Cable(comp, Rm=8000, Ra=400, Cm=0.6)
 V = m.steady_state(inject={0: 10e-12})          # mV, numpy
 Vt = m.transient(inject={0: pulse}, dt=1e-3)     # factorize once with splu, reuse per step
 m.input_resistance(0)
-cx.models.scan(comp, Ra=[...], Rm=[...])
+cnx.models.scan(comp, Ra=[...], Rm=[...])
 ```
 
 Fixes carried in from the benchmark: default micrometers with the unit stored
@@ -307,7 +326,7 @@ n.view()                               # returns a Neuroglancer URL string; neve
 n.view(viewer="spelunker" | "cave" | "flywire" | "codex")
 n.view(partners="in", top=5, synapses=True)   # cex's layered view: segments + synapse points
 comp.view()                            # compartment annotations (state kept short via the state server when available)
-cx.viz.plot3d(comp); cx.viz.plot2d(comp)      # plotly / matplotlib, imported lazily
+cnx.viz.plot3d(comp); cnx.viz.plot2d(comp)    # plotly / matplotlib, imported lazily
 ```
 
 Viewer configuration (segmentation source, voxel size, host) is a per-dataset
@@ -316,10 +335,10 @@ table in the `Source`, not hard-coded in functions, so MCNS gets a viewer too.
 ### 3.8 Cross-dataset
 
 ```python
-fw, mc = cx.open("flywire"), cx.open("mcns")
-mc.type_map                            # DataFrame: mcns_type <-> flywire_type (from the vendor table)
+fw, mc = cnx.open("flywire"), cnx.open("mcns")
+mc.type_map                            # pl.DataFrame: mcns_type <-> flywire_type (from the vendor table)
 mc.types_like("LPi14")                 # -> ["LPi12"]
-cx.compare(fw["T4a"], mc["T4a"]).inputs(by="type")   # aligned DataFrame with both datasets as columns
+cnx.compare(fw["T4a"], mc["T4a"]).inputs(by="type")  # pl.DataFrame: type, n_syn_flywire, n_syn_mcns, frac_input_flywire, ...
 ```
 
 ---
@@ -327,33 +346,34 @@ cx.compare(fw["T4a"], mc["T4a"]).inputs(by="type")   # aligned DataFrame with bo
 ## 4. Package layout
 
 ```
-src/cx/
-  __init__.py          open(), config, lazy attribute loading for heavy submodules
-  schema.py            table schemas, dtypes, invariants, schema version
+src/connexplorer/
+  __init__.py          open(), config, xyz(), lazy attribute loading for heavy submodules
+  schema.py            table schemas, dtypes, invariants, schema version, u64 aggregation helpers
   dataset.py           Dataset: manifest, table cache, __getitem__, select()
   neurons.py           Neuron, NeuronSet
-  connectivity.py      Connectivity, ConnBlock, TypeMatrix (scipy + numpy hot paths)
-  synapses.py          lazy synapse access
-  frames.py            polars <-> pandas boundary, int upcasting, frame config
+  connectivity.py      Connectivity, ConnBlock, TypeMatrix, TypeBlock (scipy + numpy hot paths)
+  synapses.py          lazy synapse access (pre- and post-sorted scans)
   ingest/
-    base.py            Source protocol, manifest writer, invariant checks
-    flywire.py         FlyWire FAFB source
-    mcns.py            Male CNS source (streamed synapse build)
+    base.py            Source protocol, manifest writer, invariant checks, NT override layer
+    flywire.py         FlyWire FAFB source, NT_OVERRIDES (13 entries from cex)
+    mcns.py            Male CNS source (streamed synapse build), NT_OVERRIDES = {}
     download.py        prebuilt-archive fetch
-  morph/               loader (navis), segmentation, compartmentalization
+  morph/               SWC loader (navis), segmentation, compartmentalization
   models/              cable model, parameter scan
   viz/                 neuroglancer/codex URL builders, plotly, matplotlib
-  cli.py               cx download | ingest | info | query | types
+  cli.py               connexplorer download | ingest | info | query | types
 tests/
   conftest.py          synthetic 4-cell fixture written to tmp_path (from cex)
-  test_*.py            unit tests on the fixture; integration tests gated on CX_DATA with the T4a ground truth (from shayan)
+  test_*.py            unit tests on the fixture; integration tests gated on CONNEXPLORER_DATA with the T4a ground truth (from shayan)
 docs/
   schema.md, quickstart.md, migrating_from_shayan.md, migrating_from_cex.md
 ```
 
-Dependencies: `polars`, `numpy`, `scipy`, `pyarrow`, `pandas`; optional
-extras `morph` (navis), `viz` (plotly, matplotlib), `cli` (click, rich). Import
-of `cx` stays under 0.15 s by loading pandas lazily and morph/viz on first use.
+Dependencies: `polars`, `numpy`, `scipy`, `pyarrow`; optional extras `morph`
+(navis), `viz` (plotly, matplotlib), `cli` (click, rich). pandas is not a
+dependency; navis returns pandas internally but the package converts at its
+own boundary. Import of `connexplorer` stays under 0.15 s by loading
+morph/viz on first use.
 
 ---
 
@@ -366,28 +386,28 @@ of `cx` stays under 0.15 s by loading pandas lazily and morph/viz on first use.
 | CSR/CSC connectivity, type matrix npz, id<->rid vectorized lookup | cex | int32 indices, lazy build, autapse flag with one default |
 | Codex + spelunker URLs with annotation layers | cex | per-dataset viewer config; no browser side effect |
 | synthetic-fixture tests, download helper | cex | as is |
-| polars loaders, fast CSV/IPC reading | shayan | become ingestion utilities |
+| polars loaders, fast CSV/IPC reading | shayan | become ingestion utilities; polars is also the only frame type the runtime returns |
 | %input / %output / geometric-mean normalization, graph stats | shayan Circuit | onto NeuronSet; denominators cached |
 | skeleton loading, natural segmentation, Compartmentalization, cable model, parameter scan | shayan | units fixed, zero-length merge, linear parent lookup, splu |
 | plotly / matplotlib compartment plots, CAVE/FlyWire viewer URLs | shayan | merged into `viz/` with cex's builders |
-| CLI, docstring style, T4a ground-truth tests | shayan | CLI grows `download`/`ingest`; tests gated on `CX_DATA` |
+| CLI, docstring style, T4a ground-truth tests | shayan | CLI grows `download`/`ingest`; tests gated on `CONNEXPLORER_DATA` |
 | dropped | shayan: raw-CSV runtime loaders, `ConnectionQuery` builder, `Circuit` as a public type, scan mode stub, unimplemented strategies | |
-| dropped | cex: dict-of-arrays returns, `_Q` suffixes, I/O-stat CSV tree, directory-creating constructor, assert-based validation, `"NAN"` sentinels, notebooks as the preprocessing entry point | |
+| dropped | cex: dict-of-arrays returns, pandas returns, `_Q` suffixes, I/O-stat CSV tree, directory-creating constructor, assert-based validation, `"NAN"` sentinels, notebooks as the preprocessing entry point | |
 
 ---
 
 ## 6. Phases
 
-**Phase 0, decisions and scaffold (1 to 2 days).** Package name. Confirm
-pandas-by-default returns. Create `src/cx` with `schema.py`, `frames.py`,
-`conftest.py` fixture and CI running the fixture tests. Add
-`docs/schema.md`.
+**Phase 0, scaffold (1 day).** Decisions are settled (section 7). Create
+`src/connexplorer` with `schema.py`, `conftest.py` fixture and CI running
+the fixture tests. Add `docs/schema.md`.
 
 **Phase 1, ingestion (3 to 5 days).** `ingest/base.py` with manifest and
 invariants; `ingest/flywire.py` producing every table from the raw exports
-(including `side`, `neuropil`, `edges_by_neuropil`, sorted synapses,
-optional `synapses_by_post`); `ingest/mcns.py` from the notebook logic with
-streamed synapses; `cx download`. Acceptance: FlyWire tables match the
+(including `side`, `neuropil`, `edges_by_neuropil`, pre-sorted synapses,
+post-sorted `synapses_by_post`, the labelled NT override layer);
+`ingest/mcns.py` from the notebook logic with streamed synapses;
+`connexplorer download`. Acceptance: FlyWire tables match the
 downloaded archive on shared columns; MCNS edges equal the vendor weights
 table (already verified once); all invariants pass.
 
@@ -399,12 +419,13 @@ type totals match the cross-check (49,069; 92,542; 192,286; 28,699); per-call
 latencies within 2x of the micro-benchmark.
 
 **Phase 3, analytics (2 to 3 days).** Normalization and graph statistics on
-`NeuronSet`; cross-dataset type mapping and `cx.compare`. Acceptance:
+`NeuronSet`; cross-dataset type mapping and `cnx.compare`. Acceptance:
 normalized Dm9 input profile reproduces `shayan`'s percentages after autapse
 alignment.
 
 **Phase 4, morphology, models, viz (3 to 5 days).** Port with the listed
-fixes; unify viewer URL builders behind per-dataset config; lazy imports.
+fixes; one SWC loader for both datasets (fetch the MCNS skeletons first);
+unify viewer URL builders behind per-dataset config; lazy imports.
 Acceptance: reference Dm9 gives a finite steady-state solution (6.2 mV at
 10 pA with the merge fix); one-skeleton load stays under 1 s.
 
@@ -415,15 +436,24 @@ both authors have migrated their working code.
 
 ---
 
-## 7. Open questions for the two authors
+## 7. Decisions by the two authors (2026-09-19)
 
-1. Package name (`cx` is a placeholder).
-2. Return pandas by default with a polars switch (recommended here), or
-   polars by default. The cost difference is negligible; it is purely about
-   familiarity.
-3. Keep `Circuit` as a named concept, or is `NeuronSet.subgraph()` enough?
-4. Ship a `synapses_by_post` copy (doubles synapse storage to ~1.3 GB per
-   dataset) or accept 50 ms input-side synapse queries?
-5. Where should MCNS skeletons come from, and in what units?
-6. Literature neurotransmitter overrides: keep cex's 13-type table as a
-   versioned layer, extend it, or drop it in favor of predictions only?
+1. **Package name: `connexplorer`** (connectome explorer). Examples import it
+   as `cnx`; the data env var is `CONNEXPLORER_DATA`.
+2. **Polars only.** Every table the package returns is a polars DataFrame
+   (or LazyFrame where documented). No pandas returns, no frame switch, no
+   pandas dependency. Reason: one consistent API.
+3. **No `Circuit` class.** `NeuronSet` with `subgraph()` and the graph
+   statistics covers it.
+4. **Ship `synapses_by_post`.** Every `Source` writes the post-sorted copy by
+   default and records it in the manifest; input- and output-side synapse
+   queries both run in ~0.5 ms. Disk cost is ~0.65 GB extra for FlyWire and
+   ~1 GB for MCNS. The runtime falls back to a full scan when the file is
+   absent, so the copy can be skipped with `build(..., by_post=False)`.
+5. **MCNS skeletons are SWC**, like FlyWire's, loaded by the same navis path
+   and always converted to micrometers. They have not been downloaded yet.
+6. **Keep the literature neurotransmitter overrides as a labelled layer.**
+   `types.parquet` carries `nt`, `nt_source` and `nt_predicted`; the override
+   table lives in each `Source` with a citation per entry (FlyWire: cex's 13
+   types; MCNS: empty). Extending the table is a science decision the authors
+   make by editing that dictionary; the manifest records its version.
