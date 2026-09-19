@@ -123,6 +123,18 @@ class NeuronSet:
         """Synapse locations where the set is pre (``"out"``), post (``"in"``) or either (``"both"``)."""
         return self.ds.synapses.of(self.idx, direction=direction, partner=partner)
 
+    # ---- morphology and viewing ----------------------------------------------
+
+    def skeletons(self, max_n: int | None = None, units: str = "um"):
+        """navis NeuronList of the members' skeletons (micrometres by default)."""
+        return self.ds.skeletons.load_many(self.ids, units=units, max_n=max_n)
+
+    def view(self, viewer: str = "spelunker", partners: str | None = None, top: int = 5, synapses: bool = False, min_syn: int | None = None) -> str:
+        """Neuroglancer (or Codex) URL for the set; never opens a browser. See ``viz.neuron_view``."""
+        from connexplorer.viz.neuroglancer import neuron_view
+
+        return neuron_view(self.ds, self.idx, viewer=viewer, partners=partners, top=top, synapses=synapses, min_syn=min_syn)
+
 
 class Neuron(NeuronSet):
     """A NeuronSet of size one with scalar conveniences."""
@@ -160,6 +172,10 @@ class Neuron(NeuronSet):
     @property
     def nt(self) -> str | None:
         return self._col("nt")
+
+    def skeleton(self, units: str = "um"):
+        """navis TreeNeuron in micrometres (or ``units="nm"``)."""
+        return self.ds.skeletons.load(self.root_id, units=units)
 
     def __repr__(self) -> str:
         return f"Neuron({self.ds.name} {self.root_id}, type={self.type}, side={self.side}, nt={self.nt})"

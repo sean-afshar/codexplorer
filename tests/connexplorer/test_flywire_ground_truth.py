@@ -165,3 +165,35 @@ def test_normalized_type_matrix_is_fast(ds):
     assert n.height == ds.connectivity.types.sparse.nnz and dt < 2.0
     row = n.filter((pl.col("pre_type") == "R8") & (pl.col("post_type") == "Dm9")).row(0, named=True)
     assert row["n_syn"] == 49524 and 0 < row["weight_norm"] < 1
+
+
+DM9 = 720575940606097068  # the reference neuron of docs/reports/bench_shayan_report.md T9
+
+
+@pytest.mark.skipif(not (TABLES / "skeletons").exists(), reason="skeleton zip not linked")
+def test_dm9_skeleton_compartments_and_cable(ds):
+    import navis  # noqa: F401  (the 1.5 s library import is excluded from the timing)
+
+    t0 = time.perf_counter()
+    sk = ds[DM9].skeleton()  # includes opening the 139k-member zip on first use
+    load = time.perf_counter() - t0
+    assert load < 1.0, f"one skeleton took {load:.2f} s"
+    t0 = time.perf_counter()
+    ds[DM9].skeleton()
+    assert time.perf_counter() - t0 < 0.1
+    assert sk.n_nodes == 5937 and str(sk.units.units) == "micrometer"
+    assert float(sk.cable_length) == pytest.approx(1439.18, abs=0.1)
+
+    comp = cnx.morph.segment(sk)  # default min_length 0.5 um
+    assert comp.table["length"].sum() == pytest.approx(float(sk.cable_length), rel=1e-6)
+    assert comp.table["length"].min() >= 0.5 and 400 < len(comp) <= 549
+    assert comp.table["n_nodes"].sum() == 5937
+
+    m = cnx.models.Cable(comp, Rm=8000, Ra=400, Cm=0.6)
+    V = m.steady_state({0: 10e-12})
+    assert np.isfinite(V).all() and V.min() > 0
+    assert 2.0 < V[0] < 20.0  # shayan's patched reference gave 6.22 mV at the root
+    assert 0.2 < m.input_resistance(0) < 2.0
+    url = comp.view(ds)
+    assert url.startswith("https://spelunker.cave-explorer.org/#!") and len(url) < 200_000
+    assert str(DM9) in ds[DM9].view(partners="in", top=3, synapses=True)

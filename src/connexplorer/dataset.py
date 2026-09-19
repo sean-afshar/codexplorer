@@ -16,9 +16,11 @@ ALIASES = {"fafb": "flywire", "flywire_fafb": "flywire", "fw": "flywire", "male_
 
 
 class Config:
-    """Process-wide settings. ``data_dir`` is searched first when opening by name."""
+    """Process-wide settings. ``data_dir`` is searched first when opening by name;
+    ``skeletons`` maps a dataset name to its SWC zip or directory."""
 
     data_dir: Path | None = None
+    skeletons: dict[str, str | Path] = {}
 
 
 config = Config()
@@ -245,3 +247,9 @@ class Dataset:
         from connexplorer.synapses import Synapses
 
         return Synapses(self)
+
+    @cached_property
+    def skeletons(self):
+        from connexplorer.morph.loader import SkeletonStore
+
+        return SkeletonStore(self)

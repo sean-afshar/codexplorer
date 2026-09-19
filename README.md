@@ -68,4 +68,12 @@ ds.connectivity.types.normalized            # every type pair with frac_output /
 ds["T4a"].degree(); ds["T4a"].hubs(k=10); ds["T4a"].reciprocal(); ds["T4a"].summary()
 mc = cnx.open("mcns"); mc.types_like("R7")  # -> ['R7_unclear', 'R7d', 'R7p', 'R7y']
 cnx.compare(ds["T4a"], mc["T4a"]).inputs()  # type, n_syn_flywire, n_syn_mcns, ..., frac_input_mcns
+
+# phase 4: morphology, cable models, viewers (skeleton zip under data/<dataset>/tables/skeletons/)
+sk = n.skeleton()                           # navis TreeNeuron, micrometres, read straight from the zip
+comp = cnx.morph.segment(sk, min_length_um=0.5)   # one compartment per navis segment, short ones merged
+m = cnx.models.Cable(comp, Rm=8000, Ra=400, Cm=0.6)
+m.steady_state({0: 10e-12}); m.input_resistance(0); cnx.models.scan(comp, Ra=[100, 400], Rm=[4000, 8000])
+n.view(partners="in", top=5, synapses=True) # Neuroglancer URL string (viewer="spelunker" | "cave" | "flywire" | "codex")
+comp.view(ds); cnx.viz.plot3d(comp); comp.plot2d()
 ```
