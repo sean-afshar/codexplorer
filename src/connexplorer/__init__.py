@@ -1,11 +1,17 @@
 """connexplorer: fast, polars-native access to fly connectomes.
 
-Phase 0 ships only the data-layer contract (:mod:`connexplorer.schema`).
-Runtime objects (``open``, ``Dataset``, ``Neuron``, ...) arrive in phase 2;
-see ``docs/merge_plan.md``.
+    import connexplorer as cnx
+    ds = cnx.open("flywire")
+    n = ds[720575940599755718]
+    n.outputs(min_syn=5)
+    ds.connectivity["T4a", "LPi14"].values
+    n.synapses(direction="in")
 """
 
+from connexplorer.dataset import Dataset, config, open, resolve
+from connexplorer.neurons import Neuron, NeuronSet
 from connexplorer.schema import SCHEMA_VERSION, TABLES, Manifest
+from connexplorer.synapses import xyz
 
-__version__ = "0.0.1"
-__all__ = ["SCHEMA_VERSION", "TABLES", "Manifest", "__version__"]
+__version__ = "0.1.0"
+__all__ = ["Dataset", "Manifest", "Neuron", "NeuronSet", "SCHEMA_VERSION", "TABLES", "config", "open", "resolve", "xyz", "__version__"]

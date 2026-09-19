@@ -44,3 +44,21 @@ uv run python -m connexplorer.ingest build mcns --raw data/mcns/raw --out data/m
 ```
 
 The output layout and invariants are documented in [docs/schema.md](docs/schema.md).
+
+Phase 2 (runtime) is in place; every table it returns is a polars DataFrame:
+
+```python
+import connexplorer as cnx
+import polars as pl
+
+ds = cnx.open("flywire")                    # finds data/flywire_783 (or set CONNEXPLORER_DATA)
+n = ds[720575940599755718]                  # Neuron;  ds["T4a"], ds[[rid, ...]] -> NeuronSet
+n.outputs(min_syn=5)                        # post, type, side, n_syn
+n.inputs(by="type")                         # type, n_syn, n_partners, frac_input
+n.inputs(by=("type", "neuropil"))           # needs edges_by_neuropil
+ds.connectivity["T4a", "LPi14"].values      # dense (1457, 4) block; .sparse / .long / .frame
+ds.connectivity.types["Mi1", "T4a"]         # type-level total
+ds.connectivity.autapses = True             # self-connections are masked by default
+n.synapses(direction="in")                  # pre, post, x_nm, y_nm, z_nm, neuropil (about 2 ms)
+ds.select(type="T4a", side="R")             # or any polars expression over ds.cells
+```
