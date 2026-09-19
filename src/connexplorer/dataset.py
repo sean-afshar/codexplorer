@@ -217,6 +217,21 @@ class Dataset:
         label = ", ".join([f"{k}={v}" for k, v in equals.items()] + [str(e) for e in exprs]) or "all"
         return NeuronSet(self, sub["id"].cast(pl.Int64).to_numpy(), label=label)
 
+    # ---- cross-dataset ---------------------------------------------------------
+
+    @property
+    def type_map(self) -> pl.DataFrame | None:
+        """``type`` -> ``flywire_type`` when the vendor annotations carry one (Male CNS), else None."""
+        from connexplorer.cross import type_map
+
+        return type_map(self)
+
+    def types_like(self, name: str) -> list[str]:
+        """Types of this dataset matching a FlyWire type name (via the vendor map, or the name itself)."""
+        from connexplorer.cross import types_like
+
+        return types_like(self, name)
+
     # ---- sub-APIs ------------------------------------------------------------
 
     @cached_property

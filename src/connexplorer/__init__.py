@@ -8,10 +8,11 @@
     n.synapses(direction="in")
 """
 
+from connexplorer.cross import Comparison, compare
 from connexplorer.dataset import Dataset, config, open, resolve
 from connexplorer.neurons import Neuron, NeuronSet
 from connexplorer.schema import SCHEMA_VERSION, TABLES, Manifest
 from connexplorer.synapses import xyz
 
 __version__ = "0.1.0"
-__all__ = ["Dataset", "Manifest", "Neuron", "NeuronSet", "SCHEMA_VERSION", "TABLES", "config", "open", "resolve", "xyz", "__version__"]
+__all__ = ["Comparison", "Dataset", "Manifest", "Neuron", "NeuronSet", "SCHEMA_VERSION", "TABLES", "compare", "config", "open", "resolve", "xyz", "__version__"]

@@ -61,4 +61,11 @@ ds.connectivity.types["Mi1", "T4a"]         # type-level total
 ds.connectivity.autapses = True             # self-connections are masked by default
 n.synapses(direction="in")                  # pre, post, x_nm, y_nm, z_nm, neuropil (about 2 ms)
 ds.select(type="T4a", side="R")             # or any polars expression over ds.cells
+
+# phase 3: normalization, graph statistics, cross-dataset comparison
+ds["Dm9"].inputs(by="type", normalize=True) # + frac_input, frac_partner_output, weight_norm
+ds.connectivity.types.normalized            # every type pair with frac_output / frac_input / weight_norm
+ds["T4a"].degree(); ds["T4a"].hubs(k=10); ds["T4a"].reciprocal(); ds["T4a"].summary()
+mc = cnx.open("mcns"); mc.types_like("R7")  # -> ['R7_unclear', 'R7d', 'R7p', 'R7y']
+cnx.compare(ds["T4a"], mc["T4a"]).inputs()  # type, n_syn_flywire, n_syn_mcns, ..., frac_input_mcns
 ```

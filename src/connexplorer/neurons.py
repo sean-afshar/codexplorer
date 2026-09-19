@@ -7,6 +7,7 @@ from typing import Iterator
 import numpy as np
 import polars as pl
 
+from connexplorer import stats
 from connexplorer.dataset import Dataset
 
 
@@ -73,13 +74,21 @@ class NeuronSet:
 
     # ---- connectivity ------------------------------------------------------
 
-    def outputs(self, by=None, min_syn: int | None = None) -> pl.DataFrame:
-        """Postsynaptic partners of the set (summed over members), strongest first."""
-        return self.ds.connectivity.partners_of(self.idx, "out", by=by, min_syn=min_syn)
+    def outputs(self, by=None, min_syn: int | None = None, normalize: bool = False) -> pl.DataFrame:
+        """Postsynaptic partners of the set (summed over members), strongest first.
 
-    def inputs(self, by=None, min_syn: int | None = None) -> pl.DataFrame:
-        """Presynaptic partners of the set (summed over members), strongest first."""
-        return self.ds.connectivity.partners_of(self.idx, "in", by=by, min_syn=min_syn)
+        ``normalize=True`` adds ``frac_output`` (share of the set's output),
+        ``frac_partner_input`` (share of the partner's total input) and ``weight_norm``.
+        """
+        return self.ds.connectivity.partners_of(self.idx, "out", by=by, min_syn=min_syn, normalize=normalize)
+
+    def inputs(self, by=None, min_syn: int | None = None, normalize: bool = False) -> pl.DataFrame:
+        """Presynaptic partners of the set (summed over members), strongest first.
+
+        ``normalize=True`` adds ``frac_input`` (share of the set's input),
+        ``frac_partner_output`` (share of the partner's total output) and ``weight_norm``.
+        """
+        return self.ds.connectivity.partners_of(self.idx, "in", by=by, min_syn=min_syn, normalize=normalize)
 
     def partners(self, min_syn: int | None = None) -> pl.DataFrame:
         """Both directions in one table: partner, type, side, n_out, n_in, n_syn."""
@@ -88,6 +97,25 @@ class NeuronSet:
     def subgraph(self):
         """Edges within the set as a ConnBlock (rows and columns are the set)."""
         return self.ds.connectivity[self, self]
+
+    # ---- graph statistics -----------------------------------------------------
+
+    def degree(self, within: bool = False) -> pl.DataFrame:
+        """Per-cell partner counts and synapse totals; ``within=True`` counts only partners in the set."""
+        return stats.degree(self.ds, self.idx, within)
+
+    def hubs(self, k: int = 10, by: str = "total_degree", within: bool = False) -> pl.DataFrame:
+        return stats.hubs(self.ds, self.idx, k, by, within)
+
+    def degree_distribution(self, direction: str = "in", within: bool = False) -> pl.DataFrame:
+        return stats.degree_distribution(self.ds, self.idx, direction, within)
+
+    def reciprocal(self, within: bool = True) -> pl.DataFrame:
+        """Pairs connected in both directions (inside the set, or with anyone when ``within=False``)."""
+        return stats.reciprocal(self.ds, self.idx, within)
+
+    def summary(self) -> dict:
+        return stats.summary(self.ds, self.idx)
 
     # ---- synapses ------------------------------------------------------------
 

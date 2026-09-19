@@ -7,6 +7,7 @@ result, including the type matrix diagonal.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import cached_property
 
 import numpy as np
@@ -17,6 +18,20 @@ from connexplorer import schema
 from connexplorer.dataset import Dataset
 
 _GROUP_COLS = ("type", "side", "neuropil")
+
+
+@dataclass(frozen=True)
+class Totals:
+    """Per-cell (or per-type) whole-dataset totals used as normalization denominators."""
+
+    out_syn: np.ndarray
+    in_syn: np.ndarray
+    out_deg: np.ndarray
+    in_deg: np.ndarray
+
+
+def _safe_frac(num, den) -> pl.Expr:
+    return pl.when(pl.col(den) > 0).then(pl.col(num) / pl.col(den)).otherwise(None)
 
 
 def _as_idx(ds: Dataset, key) -> np.ndarray:
@@ -99,6 +114,53 @@ class Connectivity:
         """CSC view of :attr:`sparse` for input-side slicing."""
         return self._csc_full if self._autapses else self._csc_noauta
 
+    # ---- normalization denominators ----------------------------------------------
+
+    @cached_property
+    def _totals_cache(self) -> dict:
+        return {}
+
+    @property
+    def cell_totals(self) -> Totals:
+        """Whole-dataset output/input synapses and partner counts per cell (respects ``autapses``)."""
+        key = ("cell", self._autapses)
+        if key not in self._totals_cache:
+            m, t = self.sparse, self.sparse_t
+            self._totals_cache[key] = Totals(
+                out_syn=np.asarray(m.sum(axis=1)).ravel().astype(np.uint64),
+                in_syn=np.asarray(t.sum(axis=0)).ravel().astype(np.uint64),
+                out_deg=np.diff(m.indptr).astype(np.uint32),
+                in_deg=np.diff(t.indptr).astype(np.uint32),
+            )
+        return self._totals_cache[key]
+
+    @cached_property
+    def _cell_type_idx(self) -> np.ndarray:
+        """type_idx per cell, -1 for untyped."""
+        return (
+            self.ds.cells.select("type")
+            .join(self.ds.types.select("type", "type_idx"), on="type", how="left")["type_idx"]
+            .fill_null(-1)
+            .cast(pl.Int64)
+            .to_numpy()
+        )
+
+    @property
+    def type_totals(self) -> Totals:
+        """Per-type sums of :attr:`cell_totals` (partners to untyped cells included), in ``ds.types`` order."""
+        key = ("type", self._autapses)
+        if key not in self._totals_cache:
+            c = self.cell_totals
+            t_idx = self._cell_type_idx
+            ok = t_idx >= 0
+            n = self.ds.n_types
+
+            def by_type(v):
+                return np.bincount(t_idx[ok], weights=v[ok].astype(np.float64), minlength=n).astype(np.uint64)
+
+            self._totals_cache[key] = Totals(by_type(c.out_syn), by_type(c.in_syn), by_type(c.out_deg), by_type(c.in_deg))
+        return self._totals_cache[key]
+
     @cached_property
     def _autapse_syn(self) -> np.ndarray:
         """Autapse synapses per cell (length N)."""
@@ -143,7 +205,36 @@ class Connectivity:
         if "side" in cells.columns:
             data["side"] = cells["side"].gather(partners)
         data["n_syn"] = pl.Series(w, dtype=pl.UInt64)
+        data["_idx"] = partners
         return pl.DataFrame(data)
+
+    def _set_total(self, idx: np.ndarray, direction: str) -> int:
+        c = self.cell_totals
+        return int((c.out_syn if direction == "out" else c.in_syn)[idx].sum())
+
+    def _normalize(self, frame: pl.DataFrame, idx: np.ndarray, direction: str, level: str) -> pl.DataFrame:
+        """Add the set-side fraction, the partner-side fraction and their geometric mean.
+
+        ``frac_input``/``frac_output``: share of the set's total input/output.
+        ``frac_partner_output``/``frac_partner_input``: share of the partner's
+        (cell or type) whole-dataset output/input that lands on the set.
+        ``weight_norm``: sqrt of the product (shayan's ``normalized_weight`` / 100).
+        """
+        set_total = self._set_total(idx, direction)
+        own = "frac_input" if direction == "in" else "frac_output"
+        other = "frac_partner_output" if direction == "in" else "frac_partner_input"
+        if level == "cell":
+            tot = self.cell_totals
+            den = (tot.out_syn if direction == "in" else tot.in_syn)[frame["_idx"].to_numpy()]
+        else:
+            tot = self.type_totals
+            t_idx = frame.select("type").join(self.ds.types.select("type", "type_idx"), on="type", how="left")["type_idx"].fill_null(-1).cast(pl.Int64).to_numpy()
+            den = np.where(t_idx >= 0, (tot.out_syn if direction == "in" else tot.in_syn)[np.maximum(t_idx, 0)], 0)
+        out = frame.with_columns(pl.Series("_den", den, dtype=pl.UInt64)).with_columns(
+            (pl.col("n_syn") / max(set_total, 1)).alias(own),
+            _safe_frac("n_syn", "_den").alias(other),
+        )
+        return out.with_columns((pl.col(own) * pl.col(other)).sqrt().alias("weight_norm")).drop("_den")
 
     @cached_property
     def _ebn_indptr(self) -> np.ndarray:
@@ -173,12 +264,15 @@ class Connectivity:
             sub = sub.filter(pl.col("pre") != pl.col("post"))
         return sub
 
-    def partners_of(self, idx: np.ndarray, direction: str, by=None, min_syn: int | None = None) -> pl.DataFrame:
+    def partners_of(self, idx: np.ndarray, direction: str, by=None, min_syn: int | None = None, normalize: bool = False) -> pl.DataFrame:
         """Partner table for a set of dense ids.
 
         ``by`` groups the partner-level table by any of ``type``, ``side``,
         ``neuropil`` (str or tuple). ``min_syn`` thresholds the per-partner
-        total before grouping, never a neuropil fragment.
+        total before grouping, never a neuropil fragment. ``normalize`` adds
+        the set-side fraction, the partner-side fraction over the whole
+        dataset, and their geometric mean (``weight_norm``); grouped tables
+        always carry the set-side fraction.
         """
         idx = np.asarray(idx, dtype=np.int64)
         partner_col = "post" if direction == "out" else "pre"
@@ -197,15 +291,22 @@ class Connectivity:
                 rows = rows.filter(pl.col(partner_col).is_in(partners))
             frame = self._neuropil_frame(rows, partner_col)
         if not group:
-            return frame
-        total = int(frame["n_syn"].sum())
+            if normalize:
+                frame = self._normalize(frame, idx, direction, "cell")
+            return frame.drop("_idx", strict=False)
+        set_total = self._set_total(idx, direction)
         frac = "frac_output" if direction == "out" else "frac_input"
         out = (
             frame.group_by(list(group))
             .agg(pl.col("n_syn").sum(), pl.col(partner_col).n_unique().alias("n_partners"))
-            .with_columns((pl.col("n_syn") / max(total, 1)).alias(frac))
+            .with_columns((pl.col("n_syn") / max(set_total, 1)).alias(frac))
             .sort("n_syn", descending=True)
         )
+        if normalize:
+            if group != ("type",):
+                raise ValueError("normalize=True with grouping is only defined for by='type'")
+            out = self._normalize(out.drop(frac), idx, direction, "type")
+            out = out.select("type", "n_syn", "n_partners", frac, out.columns[-2], "weight_norm")
         return out
 
     def _neuropil_frame(self, rows: pl.DataFrame, partner_col: str) -> pl.DataFrame:
@@ -299,6 +400,19 @@ class ConnBlock:
         ).sort("pre", "post")
 
     @property
+    def normalized(self) -> pl.DataFrame:
+        """:attr:`long` plus ``frac_output`` (of the pre cell's total output), ``frac_input`` (of the post cell's total input) and ``weight_norm``."""
+        coo = self.sparse.tocoo()
+        tot = self.conn.cell_totals
+        r, c = self.row_idx[coo.row], self.col_idx[coo.col]
+        w = coo.data.astype(np.float64)
+        fo = np.divide(w, tot.out_syn[r], out=np.full(len(w), np.nan), where=tot.out_syn[r] > 0)
+        fi = np.divide(w, tot.in_syn[c], out=np.full(len(w), np.nan), where=tot.in_syn[c] > 0)
+        return pl.DataFrame(
+            {"pre": self.ds.root_ids[r], "post": self.ds.root_ids[c], "n_syn": pl.Series(coo.data, dtype=pl.UInt32), "frac_output": fo, "frac_input": fi, "weight_norm": np.sqrt(fo * fi)}
+        ).sort("pre", "post")
+
+    @property
     def frame(self) -> pl.DataFrame:
         """Wide form: column ``pre`` (root ids) then one UInt32 column per post root id."""
         dense = self.values
@@ -376,6 +490,11 @@ class TypeMatrix:
         """Full wide matrix (n_types x n_types, UInt32) with a leading ``pre_type`` column."""
         return TypeBlock(self, np.arange(len(self.names)), np.arange(len(self.names))).frame
 
+    @property
+    def normalized(self) -> pl.DataFrame:
+        """:attr:`long` plus ``frac_output`` (of the pre type's total output), ``frac_input`` (of the post type's total input) and ``weight_norm``."""
+        return TypeBlock(self, np.arange(len(self.names)), np.arange(len(self.names))).normalized
+
     def __repr__(self) -> str:
         return f"TypeMatrix({len(self.names)} types, {int(self.sparse.sum()):,} synapses)"
 
@@ -410,6 +529,19 @@ class TypeBlock:
         coo = self.sparse.tocoo()
         r, c = pl.Series(self.row_types), pl.Series(self.col_types)
         return pl.DataFrame({"pre_type": r.gather(coo.row), "post_type": c.gather(coo.col), "n_syn": pl.Series(coo.data, dtype=pl.UInt64)}).sort("pre_type", "post_type")
+
+    @property
+    def normalized(self) -> pl.DataFrame:
+        coo = self.sparse.tocoo()
+        tot = self.tm.conn.type_totals
+        r, c = self.rows[coo.row], self.cols[coo.col]
+        w = coo.data.astype(np.float64)
+        fo = np.divide(w, tot.out_syn[r], out=np.full(len(w), np.nan), where=tot.out_syn[r] > 0)
+        fi = np.divide(w, tot.in_syn[c], out=np.full(len(w), np.nan), where=tot.in_syn[c] > 0)
+        names = pl.Series(self.tm.names)
+        return pl.DataFrame(
+            {"pre_type": names.gather(r), "post_type": names.gather(c), "n_syn": pl.Series(coo.data, dtype=pl.UInt64), "frac_output": fo, "frac_input": fi, "weight_norm": np.sqrt(fo * fi)}
+        ).sort("pre_type", "post_type")
 
     @property
     def frame(self) -> pl.DataFrame:

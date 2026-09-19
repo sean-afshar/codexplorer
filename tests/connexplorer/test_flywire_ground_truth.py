@@ -3,6 +3,7 @@
 Ground truth for neuron 720575940599755718 (T4a) from docs/reports/crosscheck_report.md.
 """
 
+import math
 import os
 import time
 from pathlib import Path
@@ -117,3 +118,50 @@ def test_latencies_are_interactive(ds):
     assert timings["T4a x LPi14 block sum"] < 5
     assert timings["Dm9 inputs by type (206 cells)"] < 50
     assert timings["one neuron output synapses"] < 50
+
+
+def test_dm9_normalized_input_profile_matches_shayan(ds):
+    """docs/reports/bench_shayan_report.md T6: Dm9 (206 cells) top-10 input types with % input.
+
+    shayan read the vendor pair export, which lacks autapses (irrelevant here: no Dm9->same-cell
+    edges survive our default mask either) and one R7 cell (37 synapses onto Dm9). So R7 is 37
+    higher here and every percentage is scaled by 147,791 / 147,828; all round to the same 0.1%.
+    """
+    prof = ds["Dm9"].inputs(by="type", normalize=True)
+    total = int(prof["n_syn"].sum())
+    assert total == 147791 + 37
+    expected = [("R8", 49524, 33.5), ("R7", 28662 + 37, 19.4), ("L3", 27045, 18.3), ("Dm8b", 10454, 7.1), ("Dm8a", 6105, 4.1),
+                ("C2", 3720, 2.5), ("Dm9", 1651, 1.1), ("T1", 1533, 1.0), ("L1", 1278, 0.9), ("aMe4", 1087, 0.7)]
+    top = prof.head(10)
+    assert top["type"].to_list() == [e[0] for e in expected]
+    assert top["n_syn"].to_list() == [e[1] for e in expected]
+    assert [round(100 * f, 1) for f in top["frac_input"]] == [e[2] for e in expected]
+    assert prof["frac_input"].sum() == pytest.approx(1.0)
+    assert prof.filter(pl.col("type").is_null())["n_syn"].item() == 26  # untyped presynaptic cells
+    # partner-side fraction: share of R8's whole-dataset output landing on Dm9
+    r8 = top.row(0, named=True)
+    assert r8["frac_partner_output"] == pytest.approx(49524 / ds.connectivity.type_totals.out_syn[ds.types["type"].to_list().index("R8")])
+    assert r8["weight_norm"] == pytest.approx(math.sqrt(r8["frac_input"] * r8["frac_partner_output"]))
+
+
+def test_graph_stats_on_real_data(ds):
+    t4a = ds["T4a"]
+    d = t4a.degree()
+    assert d.height == 1457 and d["out_syn"].sum() == ds.connectivity.cell_totals.out_syn[t4a.idx].sum()
+    hubs = t4a.hubs(k=3, by="out_syn")
+    assert hubs["out_syn"].is_sorted(descending=True)
+    r = t4a.reciprocal()
+    assert (r["type_a"] == "T4a").all() and (r["n_ab"] > 0).all() and (r["n_ba"] > 0).all()
+    s = t4a.summary()
+    assert s["n_cells"] == 1457 and s["n_syn_within"] == t4a.subgraph().sum()
+    dist = t4a.degree_distribution("in", within=True)
+    assert dist["n_cells"].sum() == 1457
+
+
+def test_normalized_type_matrix_is_fast(ds):
+    t0 = time.perf_counter()
+    n = ds.connectivity.types.normalized
+    dt = time.perf_counter() - t0
+    assert n.height == ds.connectivity.types.sparse.nnz and dt < 2.0
+    row = n.filter((pl.col("pre_type") == "R8") & (pl.col("post_type") == "Dm9")).row(0, named=True)
+    assert row["n_syn"] == 49524 and 0 < row["weight_norm"] < 1
