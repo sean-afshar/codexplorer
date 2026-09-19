@@ -27,3 +27,19 @@ and FlyWire viewer URLs. Its neuron example displays the five strongest input
 types and their synapse locations in Neuroglancer. Its optional setup section
 can download a ZIP of preprocessed FlyWire tables directly into
 `data/flywire/preprocessed/`.
+
+## connexplorer (merged package, in progress)
+
+`src/connexplorer/` is the merged package described in
+[docs/merge_plan.md](docs/merge_plan.md). Phase 1 (ingestion) is in place:
+
+```bash
+# FlyWire FAFB v783: fetch the Codex raw bundle (3 GB), then build the tables (~30 s, 11 GB RAM)
+uv run python -m connexplorer.ingest download flywire --raw data/flywire/raw
+uv run python -m connexplorer.ingest build flywire --raw data/flywire/raw --out data/flywire_783
+
+# Male CNS: put the neuPrint feather exports for a release in a raw folder, then
+uv run python -m connexplorer.ingest build mcns --raw data/mcns/raw --out data/mcns_v0.9 --version v0.9
+```
+
+The output layout and invariants are documented in [docs/schema.md](docs/schema.md).
