@@ -1,10 +1,19 @@
-"""Male CNS source: neuPrint feather exports -> schema v1 tables.
+"""Male CNS source: neuPrint flat-connectome feather exports -> schema v1 tables.
 
 Reads ``body-annotations``, ``body-neurotransmitters`` and ``syn-partners``
-for one release. The synapse partner file (300M+ rows, 6.8 GB for v0.9) is
-streamed in record-batch chunks; rows whose bodies are not annotated cells
-are dropped and counted. Synapse positions are the midpoint of the pre and
-post sites, converted from voxels to nanometres.
+for one release (files from
+``gs://flyem-male-cns/<release>/connectome-data/flat-connectome/``). The
+synapse partner file (300M+ rows, 6.8 GB) is streamed in record-batch
+chunks; rows whose bodies are not annotated cells are dropped and counted.
+Synapse positions are the midpoint of the pre and post sites, converted from
+voxels to nanometres. The cell universe is every annotated body, glia and
+orphans included; ``cells.status`` lets users filter.
+
+Neurotransmitters: ``nt``/``nt_score`` are the per-body prediction
+(``predicted_nt``, ``predicted_nt_confidence``); the vendor's per-type
+``consensus_nt`` and the ``ground_truth`` column ride along as
+``nt_consensus`` and ``nt_ground_truth``. Releases before v1.0 only have
+``consensus_nt``, which then fills ``nt``.
 """
 
 from __future__ import annotations
@@ -17,7 +26,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 import pyarrow.ipc as ipc
 
-from connexplorer.ingest.base import RawDir, RawFile, Source
+from connexplorer.ingest.base import RawDir, RawFile, Source, normalize_nt
 
 # Column name in the vendor annotation file -> our name. Missing ones are skipped.
 ANNOTATION_COLUMNS = {
@@ -29,12 +38,27 @@ ANNOTATION_COLUMNS = {
     "class": "class",
     "subclass": "subclass",
     "flywireType": "flywire_type",
+    "hemibrainType": "hemibrain_type",
+    "mancType": "manc_type",
+    "instance": "instance",
+    "group": "group",
+    "itoleeHl": "hemilineage",
+    "entryNerve": "nerve",
+    "dimorphism": "dimorphism",
+    "status": "status",
     "assignedOlHex1": "p",
     "assignedOlHex2": "q",
-    "dimorphism": "dimorphism",
 }
-NT_COLUMNS = {"body": "root_id", "consensus_nt": "nt"}
+NT_COLUMNS = {
+    "body": "root_id",
+    "predicted_nt": "nt",
+    "predicted_nt_confidence": "nt_score",
+    "consensus_nt": "nt_consensus",
+    "ground_truth": "nt_ground_truth",
+}
 PARTNER_COLUMNS = ["body_pre", "body_post", "x_pre", "y_pre", "z_pre", "x_post", "y_post", "z_post"]
+PARTNER_NEUROPIL_COLUMN = "primary_post"  # ROI of the postsynaptic site; absent before v1.0
+_UNSPECIFIED = "<unspecified>"
 
 # No literature overrides yet for the male CNS; the consensus column is used as is.
 NT_OVERRIDES: dict[str, str] = {}
@@ -53,10 +77,11 @@ def raw_files_for(release: str) -> dict[str, RawFile]:
     }
 
 
-def _read_feather(path: Path, rename: dict[str, str]) -> pl.DataFrame:
+def _read_feather(path: Path, rename: dict[str, str], required: tuple[str, ...]) -> pl.DataFrame:
+    """Read the vendor columns in ``rename`` that exist; ``required`` names our must-haves."""
     names = ipc.open_file(pa.memory_map(str(path))).schema.names
     cols = [c for c in rename if c in names]
-    missing = [c for c in rename if c not in names and rename[c] in ("root_id", "type", "nt")]
+    missing = [r for r in required if r not in {rename[c] for c in cols}]
     if missing:
         raise ValueError(f"{path.name}: required columns missing: {missing}; has {names}")
     table = feather.read_table(str(path), columns=cols, memory_map=True)
@@ -67,17 +92,25 @@ class McnsSource(Source):
     name = "mcns"
     nt_overrides = NT_OVERRIDES
     nt_overrides_version = NT_OVERRIDES_VERSION
-    type_summary_columns = ("superclass", "class", "subclass", "flywire_type")
+    type_summary_columns = ("superclass", "class", "subclass", "flywire_type", "hemibrain_type", "nt_consensus")
 
-    def __init__(self, release: str = "v0.9", voxel_size_nm: int = 8, batches_per_chunk: int = 32):
+    def __init__(self, release: str = "v1.0", voxel_size_nm: int = 8, batches_per_chunk: int = 32):
         self.version = release
         self.raw_files = raw_files_for(release)
         self.voxel_size_nm = voxel_size_nm
         self.batches_per_chunk = batches_per_chunk
 
     def cells(self, raw: RawDir) -> pl.DataFrame:
-        cells = _read_feather(raw.path("annotations"), ANNOTATION_COLUMNS).with_columns(pl.col("root_id").cast(pl.Int64))
-        nt = _read_feather(raw.path("neurotransmitters"), NT_COLUMNS).with_columns(pl.col("root_id").cast(pl.Int64))
+        cells = _read_feather(raw.path("annotations"), ANNOTATION_COLUMNS, ("root_id", "type"))
+        cells = cells.with_columns(pl.col("root_id").cast(pl.Int64))
+        if "group" in cells.columns:
+            cells = cells.with_columns(pl.col("group").cast(pl.Int64))
+        nt = _read_feather(raw.path("neurotransmitters"), NT_COLUMNS, ("root_id",)).with_columns(pl.col("root_id").cast(pl.Int64))
+        if "nt" not in nt.columns:  # pre-v1.0 files only carry the consensus
+            nt = nt.with_columns(pl.col("nt_consensus").alias("nt"))
+        for c in ("nt_consensus", "nt_ground_truth"):
+            if c in nt.columns:
+                nt = nt.with_columns(normalize_nt(pl.col(c)).alias(c))
         nt = nt.unique(subset="root_id", keep="first")
         cells = cells.join(nt, on="root_id", how="left")
         for c in ("p", "q"):
@@ -97,12 +130,14 @@ class McnsSource(Source):
         missing = [c for c in PARTNER_COLUMNS if c not in names]
         if missing:
             raise ValueError(f"syn-partners file lacks columns {missing}; has {names}")
-        idx = [names.index(c) for c in PARTNER_COLUMNS]
+        has_neuropil = PARTNER_NEUROPIL_COLUMN in names
+        cols = PARTNER_COLUMNS + ([PARTNER_NEUROPIL_COLUMN] if has_neuropil else [])
+        idx = [names.index(c) for c in cols]
         n = reader.num_record_batches
         for start in range(0, n, self.batches_per_chunk):
             batches = [reader.get_batch(i).select(idx) for i in range(start, min(start + self.batches_per_chunk, n))]
             df = pl.from_arrow(pa.Table.from_batches(batches))
-            yield df.select(
+            exprs = [
                 pl.col("body_pre").cast(pl.Int64).alias("pre_root_id"),
                 pl.col("body_post").cast(pl.Int64).alias("post_root_id"),
                 *[
@@ -112,10 +147,14 @@ class McnsSource(Source):
                     .alias(f"{ax}_nm")
                     for ax in ("x", "y", "z")
                 ],
-            )
+            ]
+            if has_neuropil:
+                npil = pl.col(PARTNER_NEUROPIL_COLUMN).cast(pl.String)
+                exprs.append(pl.when(npil == _UNSPECIFIED).then(None).otherwise(npil).alias("neuropil"))
+            yield df.select(exprs)
 
 
-def verify_against_weights(tables_dir: Path, raw_dir: Path, release: str = "v0.9") -> dict[str, int]:
+def verify_against_weights(tables_dir: Path, raw_dir: Path, release: str = "v1.0") -> dict[str, int]:
     """Compare ``edges.parquet`` with the vendor ``connectome-weights`` file.
 
     Returns counts; ``mismatched_pairs`` and ``missing_pairs`` should be 0.

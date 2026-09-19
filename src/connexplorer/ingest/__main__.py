@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("dataset", choices=sorted(ingest.SOURCES))
     b.add_argument("--raw", required=True, help="raw download directory")
     b.add_argument("--out", required=True, help="dataset directory; tables go in <out>/tables")
-    b.add_argument("--version", help="FlyWire snapshot (default 783) or MCNS release (default v0.9)")
+    b.add_argument("--version", help="FlyWire snapshot (default 783) or MCNS release (default v1.0)")
     b.add_argument("--no-by-post", action="store_true", help="skip the post-sorted synapse copy")
     b.add_argument("--no-hash", action="store_true", help="do not sha256 the raw files")
 

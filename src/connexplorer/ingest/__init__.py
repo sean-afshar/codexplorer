@@ -2,7 +2,7 @@
 
     from connexplorer import ingest
     ingest.build(ingest.FlyWireSource(), "data/flywire_783", raw="data/flywire/raw")
-    ingest.build(ingest.McnsSource("v0.9"), "data/mcns_v0.9", raw="data/mcns/raw")
+    ingest.build(ingest.McnsSource("v1.0"), "data/mcns_v1.0", raw="data/mcns/raw")
 """
 
 from pathlib import Path

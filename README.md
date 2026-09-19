@@ -38,8 +38,9 @@ can download a ZIP of preprocessed FlyWire tables directly into
 uv run python -m connexplorer.ingest download flywire --raw data/flywire/raw
 uv run python -m connexplorer.ingest build flywire --raw data/flywire/raw --out data/flywire_783
 
-# Male CNS: put the neuPrint feather exports for a release in a raw folder, then
-uv run python -m connexplorer.ingest build mcns --raw data/mcns/raw --out data/mcns_v0.9 --version v0.9
+# Male CNS v1.0: body-annotations, body-neurotransmitters and syn-partners from
+# gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/ in a raw folder, then (~45 s, 20 GB RAM)
+uv run python -m connexplorer.ingest build mcns --raw data/mcns/raw --out data/mcns_v1.0 --version v1.0
 ```
 
 The output layout and invariants are documented in [docs/schema.md](docs/schema.md).

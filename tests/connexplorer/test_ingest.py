@@ -235,11 +235,22 @@ def write_mcns_raw(raw: Path, release: str = "v0.9") -> Path:
             "flywireType": ["Mi1", "Mi1", "R7", None],
             "assignedOlHex1": pa.array([3.0, None, 5.0, None], pa.float64()),
             "assignedOlHex2": pa.array([4.0, None, 6.0, None], pa.float64()),
+            "status": ["Traced", "Traced", "Traced", "Orphan"],
+            "group": pa.array([10.0, 10.0, None, None], pa.float64()),
             "unrelated": [1, 2, 3, 4],
         }
     )
     _feather(raw / f"body-annotations-male-cns-{release}-minconf-0.5.feather", ann)
-    nt = pa.table({"body": pa.array([10, 11, 12, 99], pa.int64()), "cell_type": ["Mi1", "Mi1", "R7d", "x"], "consensus_nt": ["acetylcholine", "unclear", "histamine", "gaba"]})
+    nt = pa.table(
+        {
+            "body": pa.array([10, 11, 12, 99], pa.int64()),
+            "cell_type": ["Mi1", "Mi1", "R7d", "x"],
+            "predicted_nt": ["acetylcholine", "unclear", "histamine", "gaba"],
+            "predicted_nt_confidence": pa.array([0.9, 0.3, 0.8, 0.5], pa.float64()),
+            "ground_truth": [None, "acetylcholine", None, None],
+            "consensus_nt": ["acetylcholine", "acetylcholine", "histamine", "gaba"],
+        }
+    )
     _feather(raw / f"body-neurotransmitters-male-cns-{release}.feather", nt)
     partners = pa.table(
         {
@@ -251,7 +262,8 @@ def write_mcns_raw(raw: Path, release: str = "v0.9") -> Path:
             "y_post": pa.array([12, 14, 22, 32, 34, 42, 0], pa.int32()),
             "z_post": pa.array([12, 14, 22, 32, 34, 42, 0], pa.int32()),
             "body_post": pa.array([11, 11, 12, 10, 10, 10, 10], pa.int64()),
-            "confidence": pa.array([0.9] * 7, pa.float32()),
+            "conf_post": pa.array([0.9] * 7, pa.float32()),
+            "primary_post": pa.array(["ME(R)", "ME(R)", "<unspecified>", "LO(R)", "LO(R)", "LO(R)", "LO(R)"]).dictionary_encode(),
         }
     )
     _feather(raw / f"syn-partners-male-cns-{release}-minconf-0.5.feather", partners, batch_rows=2)
@@ -271,6 +283,11 @@ def test_mcns_build_streams_partners_and_converts_voxels(tmp_path):
     assert cells["root_id"].to_list() == [10, 11, 12, 13]  # Mi1, Mi1, R7d, untyped
     assert cells["side"].to_list() == ["L", "R", "M", None]
     assert cells["nt"].to_list() == ["ACH", None, "HIS", None]  # 'unclear' -> null; synonyms mapped
+    assert cells["nt_score"].to_list() == pytest.approx([0.9, 0.3, 0.8, None]) or cells["nt_score"][3] is None
+    assert cells["nt_consensus"].to_list() == ["ACH", "ACH", "HIS", None]
+    assert cells["nt_ground_truth"].to_list() == [None, "ACH", None, None]
+    assert cells["status"].to_list() == ["Traced", "Traced", "Traced", "Orphan"]
+    assert cells["group"].dtype == pl.Int64
     assert cells["p"].to_list() == [3, None, 5, None]
     assert "unrelated" not in cells.columns
 
@@ -278,10 +295,15 @@ def test_mcns_build_streams_partners_and_converts_voxels(tmp_path):
     assert types["type"].to_list() == ["Mi1", "R7d"]
     assert types["nt"].to_list() == ["ACH", "HIS"]
     assert types["nt_source"].to_list() == ["prediction", "prediction"]
+    assert types["nt_consensus"].to_list() == ["ACH", "HIS"]
     assert types["flywire_type"].to_list() == ["Mi1", "R7"]
 
     syn = pl.read_parquet(t / "synapses.parquet")
     assert syn.height == 6  # body 77 dropped
+    assert syn.columns == ["pre", "post", "x_nm", "y_nm", "z_nm", "neuropil"]
+    assert syn["neuropil"].null_count() == 1  # "<unspecified>" -> null
+    by_np = schema.read_table(t, "edges_by_neuropil")
+    assert by_np.filter(pl.col("neuropil") == "LO(R)")["n_syn"].sum() == 3
     assert res.manifest.extras["synapses_dropped_unknown_cell"] == 1
     first = syn.filter((pl.col("pre") == 0) & (pl.col("post") == 1)).sort("x_nm")
     assert first["x_nm"].to_list() == [(10 + 12) * 4, (10 + 14) * 4]  # midpoint in voxels * 8 nm
@@ -292,6 +314,16 @@ def test_mcns_build_streams_partners_and_converts_voxels(tmp_path):
     check = ingest.verify_against_weights(t, raw, "v0.9")
     assert check["mismatched_pairs"] == 0 and check["missing_pairs"] == 0
     assert check["edges"] == 4
+
+
+def test_mcns_pre_v1_transmitter_file_falls_back_to_consensus(tmp_path):
+    raw = write_mcns_raw(tmp_path / "raw")
+    nt = pa.table({"body": pa.array([10, 11, 12], pa.int64()), "cell_type": ["Mi1", "Mi1", "R7d"], "consensus_nt": ["gaba", "gaba", "histamine"]})
+    _feather(raw / "body-neurotransmitters-male-cns-v0.9.feather", nt)
+    src = ingest.McnsSource("v0.9")
+    cells = src.cells(base.RawDir(raw, src.raw_files))
+    assert cells["nt"].to_list() == ["gaba", "gaba", "histamine", None]  # raw spelling; build() normalizes
+    assert "nt_score" not in cells.columns
 
 
 def test_mcns_reports_missing_partner_columns(tmp_path):
