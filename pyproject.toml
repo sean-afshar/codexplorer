@@ -3,7 +3,7 @@ name = "connexplorer"
 version = "0.1.0"
 description = "Fast, polars-native access to fly connectomes (FlyWire FAFB, Male CNS): connectivity, synapses, morphology, cable models, viewers"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "polars>=1.0",
     "numpy>=1.24",
