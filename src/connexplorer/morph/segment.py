@@ -209,6 +209,18 @@ class Compartments:
     def diameters(self) -> np.ndarray:
         return 2.0 * self.table["radius_mean"].to_numpy()
 
+    def nearest(self, xyz_um: np.ndarray) -> np.ndarray:
+        """Compartment id of the skeleton node nearest to each point (k, 3) in micrometres.
+
+        Use it to place synapses (``cnx.xyz(df) / 1e3``) onto compartments.
+        """
+        from scipy.spatial import cKDTree
+
+        if not hasattr(self, "_tree"):
+            self._tree = cKDTree(self.neuron.nodes[["x", "y", "z"]].to_numpy())
+        _, rows = self._tree.query(np.asarray(xyz_um, dtype=np.float64).reshape(-1, 3))
+        return self.comp_of_node[rows]
+
     def hines(self, Ra: float = 400.0) -> sp.csr_matrix:
         """Axial conductance structure (siemens): -g on parent/child pairs, row sums on the diagonal.
 

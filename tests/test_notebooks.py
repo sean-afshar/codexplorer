@@ -29,5 +29,8 @@ def test_tour_cells_execute():
         if cell.cell_type == "code":
             exec(compile(cell.source, f"{NB}#{nb.cells.index(cell)}", "exec"), ns)
     go.Figure.show = monkeypatch_show
-    assert ns["V"].min() > 0 and "url" in ns and ns["sk_mc"].n_nodes > 0
+    assert ns["V"].min() > 0                       # CT1 cable model solved
+    assert ns["fields"].height == 128              # one row per right-hemisphere Dm9
+    assert ns["N_shared"].nnz > 0 and ns["W"].shape[0] == len(ns["pr"])
+    assert ns["mi1"].skeleton().n_nodes > 0        # Male CNS skeleton fetched on demand
 

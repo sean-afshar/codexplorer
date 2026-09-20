@@ -84,6 +84,9 @@ def test_natural_segmentation_geometry(ds):
     assert 1 in comp.nodes(0)  # root node in compartment 0
     assert len(comp) == 3 and sorted(t["length"].round(3).to_list()) == [0.1, 16.0, 40.0]
     assert comp.nodes(0).tolist() == [1, 2, 3, 4, 5, 6] and t["depth"].to_list() == [0, 1, 2]  # twig hangs off the z limb
+    # synapse placement: points near node 6 (30, 10, 0) and node 8 (30, 0, 16) land in their compartments
+    near = comp.nearest(np.array([[30.1, 9.9, 0.0], [30.0, 0.2, 15.8]]))
+    assert near.tolist() == [comp.comp_of_node[5], comp.comp_of_node[7]]
     h = comp.hines(400.0)
     assert (abs(h - h.T) > 1e-15).nnz == 0 and np.allclose(h.sum(axis=1), 0)
 
