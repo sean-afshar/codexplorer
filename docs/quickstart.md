@@ -84,7 +84,10 @@ comp.plot3d(); comp.plot2d(); cnx.viz.plot_voltage(comp, V)
 ```
 
 Skeletons are read from `data/<dataset>/tables/skeletons/` (a zip or a folder of
-`<root_id>.swc`), or from `cnx.config.skeletons["flywire"]`.
+`<root_id>.swc`), or from `cnx.config.skeletons["flywire"]`. The Male CNS has no
+local set: `mc[body_id].skeleton()` fetches that body's precomputed skeleton from
+the vendor store on first use, stores it as SWC in that folder, and assigns
+`radius_um` (default 0.25) to every node because the store carries no radii.
 
 ## Viewers
 

@@ -7,19 +7,17 @@ requires-python = ">=3.13"
 dependencies = [
     "polars>=1.0",
     "numpy>=1.24",
-    "pandas>=2.0",
     "scipy>=1.10",
     "pyarrow>=14",
+    "click>=8.0",
+    "rich>=13.0",
     "navis>=1.9",
     "plotly>=5.0",
     "matplotlib>=3.7",
-    "click>=8.0",
-    "rich>=13.0",
 ]
 
 [project.scripts]
 connexplorer = "connexplorer.cli:cli"
-connect-tome = "shayan.cli:cli"  # legacy, deprecated
 
 [project.optional-dependencies]
 notebooks = ["ipykernel>=6", "jupyterlab>=4"]
@@ -31,10 +29,9 @@ dev = ["pytest>=8.0", "nbformat>=5.10"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# Every package under src/ is discovered automatically, so a second
-# subfolder (e.g. src/<colleague>/) needs no change here.
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["connexplorer*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

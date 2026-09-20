@@ -185,3 +185,52 @@ def test_plots_render(ds):
     assert cnx.viz.plot_voltage(comp, V).layout.title.text.startswith(f"{len(comp)} compartments")
     with pytest.raises(ValueError):
         cnx.viz.plot3d(comp, color_by="mood")
+
+
+def _precomputed(vertices_nm, edges) -> bytes:
+    import struct
+
+    v = np.asarray(vertices_nm, dtype="<f4")
+    e = np.asarray(edges, dtype="<u4")
+    return struct.pack("<II", len(v), len(e)) + v.tobytes() + e.tobytes()
+
+
+def test_precomputed_skeleton_parsing_and_on_demand_fetch(fixture_tables, monkeypatch):
+    from connexplorer.morph import loader
+
+    ds = cnx.open(fixture_tables)
+    # pretend the fixture is the Male CNS so the remote template applies
+    monkeypatch.setattr(ds, "name", "mcns")
+    monkeypatch.setattr(ds, "version", "v1.0")
+    blob = _precomputed([[0, 0, 0], [10000, 0, 0], [20000, 0, 0], [20000, 5000, 0], [20000, 0, 3000]], [[0, 1], [1, 2], [2, 3], [2, 4], [3, 4]])  # one cycle
+    urls = []
+
+    def fetcher(url):
+        urls.append(url)
+        return blob
+
+    store = loader.SkeletonStore(ds, fetcher=fetcher)
+    assert store.path is None and store.remote.endswith("/v1.0/segmentation/skeletons-malecns/skeletons-precomputed/{root_id}")
+    n = store.load(12)
+    assert urls == ["https://storage.googleapis.com/flyem-male-cns/v1.0/segmentation/skeletons-malecns/skeletons-precomputed/12"]
+    assert n.n_nodes == 5 and str(n.units.units) == "micrometer" and n.id == 12
+    assert float(n.cable_length) == pytest.approx(10 + 10 + 5 + 3)  # the cycle-closing edge is dropped
+    assert (n.nodes.radius == 0.25).all()
+    # saved as SWC next to the tables and read back from disk from now on
+    assert (fixture_tables / "skeletons" / "12.swc").exists() and store.has(12)
+    n2 = store.load(12)
+    assert len(urls) == 1 and float(n2.cable_length) == pytest.approx(28.0)
+    assert "fetch on demand" in repr(store)
+    with pytest.raises(KeyError, match="could not fetch"):
+        loader.SkeletonStore(ds, fetcher=lambda u: (_ for _ in ()).throw(OSError("offline"))).load(99)
+    with pytest.raises(KeyError, match="no skeleton"):
+        store.load(99, fetch=False)
+
+
+def test_precomputed_parser_handles_forest_and_empty():
+    from connexplorer.morph.loader import parse_precomputed_skeleton
+
+    n = parse_precomputed_skeleton(_precomputed([[0, 0, 0], [1000, 0, 0], [5000, 0, 0], [6000, 0, 0]], [[0, 1], [2, 3]]), 7)
+    assert n.n_nodes == 4 and (n.nodes.parent_id == -1).sum() == 2
+    empty = parse_precomputed_skeleton(_precomputed(np.zeros((0, 3)), np.zeros((0, 2))), 8)
+    assert empty.n_nodes == 0

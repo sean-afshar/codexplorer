@@ -3,8 +3,7 @@
 Fast, polars-native access to fly connectomes. One package for FlyWire FAFB
 (v783) and the Male CNS (v1.0): cells and types, connectivity at cell and type
 level, synapse locations, skeletons and passive cable models, and Neuroglancer
-links. Built from two earlier packages (`shayan`, `cex`) that still live under
-`src/` for reference and are deprecated.
+links.
 
 ```bash
 uv sync                         # or: pip install -e .
@@ -28,7 +27,7 @@ n.view(partners="in", top=5, synapses=True) # Neuroglancer URL
 - [docs/schema.md](docs/schema.md): on-disk tables, invariants, manifest.
 - [docs/migrating_from_shayan.md](docs/migrating_from_shayan.md), [docs/migrating_from_cex.md](docs/migrating_from_cex.md).
 - [docs/merge_plan.md](docs/merge_plan.md): the design and its evidence.
-- [notebooks/connexplorer/](notebooks/connexplorer/): quickstart and dataset-building notebooks.
+- [notebooks/00_tour.ipynb](notebooks/00_tour.ipynb): a tour of everything, with T4/T5 connectivity and CT1 morphology; [notebooks/01_build_datasets.ipynb](notebooks/01_build_datasets.ipynb) builds the tables.
 
 ## Data
 
@@ -44,7 +43,13 @@ connexplorer build mcns --raw data/mcns/raw --out data/mcns_v1.0 --version v1.0
 For the Male CNS put `body-annotations`, `body-neurotransmitters` and
 `syn-partners` for the release (from
 `gs://flyem-male-cns/<release>/connectome-data/flat-connectome/`) in the raw
-folder. Skeleton zips go in `data/<dataset>/tables/skeletons/`.
+folder.
+
+Skeletons live in `data/<dataset>/tables/skeletons/`, either one zip or a
+folder of `<root_id>.swc` files. FlyWire ships one 13 GB zip. The Male CNS
+skeletons are too large to hold as a set, so `mc[body_id].skeleton()` fetches
+that one body from the vendor's public store on first use and keeps it as an
+SWC file in that folder.
 
 ## Development
 
@@ -52,6 +57,3 @@ folder. Skeleton zips go in `data/<dataset>/tables/skeletons/`.
 uv run pytest                    # fixture tests (CI)
 uv run pytest -m slow            # also the real-data tests, when datasets are built
 ```
-
-`src/shayan` and `src/cex` are the pre-merge packages. They import with a
-deprecation warning and will be removed once both authors have migrated.
