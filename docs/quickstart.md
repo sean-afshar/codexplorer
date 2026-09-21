@@ -98,6 +98,22 @@ n.view(partners="in", top=5, synapses=True)   # partner types as layers + synaps
 comp.view(ds)                                 # compartment centres as annotations
 ```
 
+## Column maps
+
+```python
+cols = ds.columns.filter(pl.col("side") == "R")          # p, q per columnar cell
+cnx.viz.hexmap(cols)                                      # one hexagon per column
+cnx.viz.hexmap(table, "column_type", colors={"pale": "#9370db", "yellow1": "#f5a623"})
+cnx.viz.hexmap(table, "n_syn", cmap="magma", vmin=0)      # numeric -> colorbar; None/NaN -> grey
+cnx.viz.hexmap(table, {column_id: value, ...}, annotate=True, highlight=[(p, q)])
+cnx.viz.hex_distance([p1, q1], [p2, q2]); cnx.viz.hex_neighbors(p, q); cnx.viz.pq_to_xy(pq)
+```
+
+`table` is any polars or pandas frame with `p`, `q` (and `column_id`) columns; values can be a
+column name, a `{column_id: value}` mapping or an aligned array. Categorical values get a legend
+with counts. On this lattice the neighbours of `(p, q)` are `(p±1, q)`, `(p, q±1)` and `(p±1, q±1)`;
+`(1, -1)` is two steps away.
+
 ## Two datasets
 
 ```python
