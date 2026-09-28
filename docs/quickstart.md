@@ -106,6 +106,7 @@ cnx.viz.hexmap(cols)                                      # one hexagon per colu
 cnx.viz.hexmap(table, "column_type", colors={"pale": "#9370db", "yellow1": "#f5a623"})
 cnx.viz.hexmap(table, "n_syn", cmap="magma", vmin=0)      # numeric -> colorbar; None/NaN -> grey
 cnx.viz.hexmap(table, {column_id: value, ...}, annotate=True, highlight=[(p, q)])
+cnx.viz.hexmap(table, "t0", annotate="values", fmt=".1f")   # or annotate="<column>"
 cnx.viz.hex_distance([p1, q1], [p2, q2]); cnx.viz.hex_neighbors(p, q); cnx.viz.pq_to_xy(pq)
 ```
 

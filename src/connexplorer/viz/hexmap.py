@@ -138,6 +138,7 @@ def hexmap(
     title: str | None = None,
     mirror: bool = False,
     annotate: bool | str = False,
+    fmt: str | None = None,
     fontsize: float = 5,
     highlight: Sequence[tuple[int, int]] | None = None,
     highlight_color: str = "red",
@@ -162,7 +163,11 @@ def hexmap(
         fill, a single colour.
     annotate
         ``True`` writes ``column_id`` (or ``"p,q"`` when unavailable) in each
-        hexagon; a column name writes that column's value.
+        hexagon; ``"values"`` writes the plotted value; any other string is a
+        column name of ``columns`` whose value is written.
+    fmt
+        Format spec applied to numeric annotations, e.g. ``".2f"``; missing
+        values are written as an empty string.
     highlight
         ``(p, q)`` pairs to outline in ``highlight_color``.
 
@@ -228,14 +233,28 @@ def hexmap(
             )
 
     if annotate:
-        if isinstance(annotate, str):
-            text = [str(v) for v in get(annotate)]
+        def _fmt(v):
+            if _is_missing(v):
+                return ""
+            if fmt and isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, (bool, np.bool_)):
+                return format(v, fmt)
+            return str(v)
+
+        if annotate == "values":
+            if vals is None:
+                raise ValueError('annotate="values" requires values')
+            text = [_fmt(v) for v in vals]
+        elif isinstance(annotate, str):
+            if get is None:
+                raise ValueError("annotate by column name requires a DataFrame input")
+            text = [_fmt(v) for v in get(annotate)]
         elif cid is not None:
             text = [str(int(c)) for c in cid]
         else:
             text = [f"{int(a)},{int(b)}" for a, b in zip(p, q)]
         for (x, y), t in zip(xy, text):
-            ax.text(x, y, t, ha="center", va="center", fontsize=fontsize)
+            if t:
+                ax.text(x, y, t, ha="center", va="center", fontsize=fontsize)
 
     ax.set_aspect("equal")
     ax.autoscale_view()

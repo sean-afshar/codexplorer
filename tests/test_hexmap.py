@@ -74,3 +74,13 @@ def test_hexmap_collapses_duplicate_rows(cols):
 def test_hexmap_rejects_misaligned_values(cols):
     with pytest.raises(ValueError):
         hexmap(cols, [1, 2, 3])
+
+
+def test_hexmap_annotation_formatting(cols):
+    ax = hexmap(cols, "score", annotate="values", fmt=".2f")
+    assert sorted(t.get_text() for t in ax.texts) == ["0.10", "0.50", "1.00"]   # null skipped
+    ax = hexmap(cols, "kind", annotate="score", fmt=".1f")
+    assert sorted(t.get_text() for t in ax.texts) == ["0.1", "0.5", "1.0"]
+    with pytest.raises(ValueError):
+        hexmap(cols, annotate="values")
+
